@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { test, expect } from '@playwright/test'
 import { createRequire } from 'node:module'
 
@@ -214,4 +215,25 @@ test('video call dialogs and permission errors remain usable', async ({
     page.getByRole('button', { name: 'Start Video Call' }),
   ).toBeEnabled()
   await friend.close()
+})
+
+test('registered accounts can leave and sign in again with their reserved handle', async ({ page }) => {
+  const username = 'user_' + randomUUID().slice(0, 8)
+  const password = randomUUID()
+  await page.goto('/')
+  await page.getByLabel('Access', { exact: true }).selectOption('register')
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page.locator('.sidebar-bottom strong')).toHaveText('@' + username)
+  await page.getByRole('button', { name: 'Leave space' }).click()
+  await page.getByLabel('Access', { exact: true }).selectOption('login')
+  await page.getByLabel('Username').fill(username)
+  await page.getByLabel('Password').fill(password + 'wrong')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Incorrect username or password.')
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await send(page, 'Signed in again')
+  await expect(page.getByText('Signed in again', { exact: true })).toBeVisible()
 })

@@ -10,4 +10,16 @@ services:
     healthCheckPath: /health
     envVars:
       - key: CLIENT_ORIGIN
+        value: https://chattingapp-kappa.vercel.app
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: TRUSTED_PROXY
+        value: "loopback,linklocal,uniquelocal"
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: ACCOUNT_KEY
         sync: false

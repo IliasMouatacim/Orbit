@@ -56,6 +56,10 @@ function App() {
   const iceServers = useMemo(() => buildIceServers(), [])
 
   const [name, setName] = useState('')
+  const [mode, setMode] = useState('guest')
+  const [password, setPassword] = useState('')
+  const [accountError, setAccountError] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
   const [joined, setJoined] = useState(false)
   const [messages, setMessages] = useState({ global: [] })
   const [activeChat, setActiveChat] = useState('global')
@@ -137,7 +141,14 @@ function App() {
       if (identityRef.current) socket.emit('join_room', identityRef.current)
       roomsRef.current.forEach((room) => socket.emit('join_private_room', room))
     }
-    const onDisconnect = () => setConnected(false)
+    const onDisconnect = (reason) => {
+      setConnected(false)
+      if (socket.auth?.token && (reason === 'io server disconnect' || reason?.message === 'Session expired')) {
+        socket.auth = {}
+        identityRef.current = ''
+        window.location.reload()
+      }
+    }
     socket.on('disconnect', onDisconnect)
     socket.on('connect_error', onDisconnect)
     socket.on('connect', onConnect)
@@ -395,10 +406,43 @@ function App() {
     }
   }, [joined, receivingCall, stream, callAccepted])
 
-  const joinRoom = (event) => {
+  const joinRoom = async (event) => {
     event.preventDefault()
     const cleanName = name.trim().slice(0, 24)
     if (!cleanName || !connected) {
+      return
+    }
+    setAccountError('')
+    if (mode !== 'guest') {
+      setAuthBusy(true)
+      try {
+        const endpoint = new URL(apiUrl, window.location.href)
+        if (endpoint.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)) {
+          throw new Error('Account access requires an HTTPS backend.')
+        }
+        const response = await fetch(new URL('/accounts/' + mode, endpoint), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: cleanName, password }),
+        })
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || 'Account request failed.')
+        socket.disconnect()
+        socket.auth = { token: data.token }
+        identityRef.current = data.name
+        setName(data.name)
+        setPassword('')
+        setJoined(true)
+        socket.connect()
+      } catch (error) {
+        setAccountError(error.message)
+      } finally {
+        setAuthBusy(false)
+      }
+      return
+    }
+    if (cleanName.startsWith('@')) {
+      setAccountError('Account handles start with @. Choose another guest name.')
       return
     }
     identityRef.current = cleanName
@@ -739,27 +783,44 @@ function App() {
               is waiting.
             </h2>
             <p>
-              No account. No long introductions.
-              <br />
-              Just a name, and you’re in.
+              Join as a guest or use your account.
+
             </p>
             <form className="join-form" onSubmit={joinRoom}>
-              <label htmlFor="display-name">What should we call you?</label>
+              <label htmlFor="account-mode">Access</label>
+              <select id="account-mode" disabled={authBusy} value={mode} onChange={(event) => {
+                setMode(event.target.value)
+                setAccountError('')
+                setPassword('')
+              }}>
+                <option value="guest">Guest</option>
+                <option value="login">Sign in</option>
+                <option value="register">Create account</option>
+              </select>
+              <label htmlFor="display-name">{mode === 'guest' ? 'What should we call you?' : 'Username'}</label>
               <input
                 id="display-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Enter your display name"
                 maxLength={24}
-                autoComplete="nickname"
+                autoComplete={mode === 'guest' ? 'nickname' : 'username'}
+                pattern={mode === 'guest' ? undefined : '[A-Za-z0-9_]{3,23}'}
                 required
               />
+              {mode !== 'guest' && <>
+                <label htmlFor="account-password">Password (at least 12 characters)</label>
+                <input id="account-password" type="password" minLength={12} required
+                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  value={password} onChange={(event) => setPassword(event.target.value)} />
+              </>}
+              {accountError && <p role="alert">{accountError}</p>}
               <button
                 className="primary-button"
                 type="submit"
-                disabled={!name.trim() || !connected}
+                disabled={authBusy || !name.trim() || !connected}
               >
-                Join Space <Icon name="arrow" />
+                {mode === 'guest' ? 'Join Space' : mode === 'login' ? 'Sign in' : 'Create account'} <Icon name="arrow" />
               </button>
             </form>
             <div
@@ -967,7 +1028,20 @@ function App() {
             className="icon-button"
             title="Leave space"
             aria-label="Leave space"
-            onClick={() => window.location.reload()}
+            onClick={async () => {
+              if (socket.auth?.token) {
+                try {
+                  const response = await fetch(new URL('/accounts/logout', apiUrl), {
+                    method: 'POST', headers: { Authorization: 'Bearer ' + socket.auth.token },
+                  })
+                  if (!response.ok) throw new Error()
+                } catch {
+                  setNotice('Could not sign out. Reconnect and try again.')
+                  return
+                }
+              }
+              window.location.reload()
+            }}
           >
             <Icon name="exit" size={18} />
           </button>

@@ -71,7 +71,7 @@ Backend default URL: `http://localhost:4000`
 
 ## Notes
 
-- The chat is realtime but in-memory only (no database/history persistence).
+- Messages are realtime and stay in memory. Registered accounts persist in SQLite.
 - If your backend is sleeping on free Render tier, first message may be delayed while waking up.
 - WebRTC calls need a TURN server for many mobile/corporate/NAT-restricted networks; STUN-only can fail to exchange media.
 
@@ -107,3 +107,11 @@ npm run test:e2e
 To use an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE`
 to its executable path when running the suite. Tests use simulated camera and
 microphone devices; no actual camera or microphone is recorded.
+
+### Accounts and encryption
+
+Choose **Create account** on the welcome screen, or **Sign in** to reclaim an existing handle. Account handles begin with @. Guests can still join public chat. Leaving the space signs out. Refreshing the page clears the browser's in-memory token. Sessions expire after eight hours and restarting the backend invalidates them.
+
+Run the backend with Node.js 24. Account records use SQLite, a keyed username lookup, salted scrypt password verifiers, and AES-256-GCM authenticated encryption. Local development generates a key under the ignored backend/.accounts directory. For production, set NODE_ENV=production, supply ACCOUNT_KEY from a secret manager (generate 32 random bytes with `openssl rand -hex 32`), and configure storage. On Render, set TURSO_DATABASE_URL to the database libsql URL and TURSO_AUTH_TOKEN to its database-scoped write token. The backend creates its accounts table before accepting traffic. For self-hosted local SQLite, point ACCOUNT_DATA_DIR at a persistent volume. Keep a separate secure backup of the key alongside your database backup procedure. This version supports a single backend instance.
+
+Serve the frontend and backend through HTTPS in production. Terminate TLS at a reverse proxy that supports WebSocket upgrades, configure the proxy to overwrite forwarded headers, set TRUSTED_PROXY to its IP or CIDR (default loopback), restrict direct backend access to the proxy, set CLIENT_ORIGIN to the frontend origin, and set VITE_API_URL to the HTTPS backend URL before building. Chat messages remain in memory. The server can read messages as it relays them, so this design provides transport encryption with TLS and encrypted account storage, with no end-to-end message encryption.

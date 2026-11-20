@@ -14,7 +14,28 @@ app.use(
     origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
   }),
 );
-app.use(express.json());
+// In production only the trusted TLS terminator may reach this listener.
+app.set('trust proxy', process.env.TRUSTED_PROXY || 'loopback');
+const trustProxy = app.get('trust proxy fn');
+const secureTransport = (req) => req.socket.encrypted ||
+  (trustProxy(req.socket.remoteAddress, 0) && req.headers['x-forwarded-proto'] === 'https');
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV === 'production' && req.path !== '/health' && !secureTransport(req)) {
+    return res.status(403).json({ error: 'HTTPS required.' });
+  }
+  next();
+});
+app.use(express.json({ limit: '4kb' }));
+const { authenticate, sessions, ready } = require('./accounts').openAccounts();
+app.post(['/accounts/register', '/accounts/login'], authenticate);
+app.post('/accounts/logout', (req, res) => {
+  const token = req.get('Authorization')?.replace(/^Bearer /, '');
+  sessions.delete(token);
+  for (const client of io.sockets.sockets.values()) {
+    if (token && client.handshake.auth.token === token) client.disconnect(true);
+  }
+  res.sendStatus(204);
+});
 
 app.get('/', (_req, res) => {
   res.json({ message: 'Chat backend is running.' });
@@ -28,6 +49,7 @@ app.get('/health', (_req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
+  allowRequest: (req, done) => done(null, process.env.NODE_ENV !== 'production' || secureTransport(req)),
   cors: {
     origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     methods: ['GET', 'POST'],
@@ -59,12 +81,27 @@ const emitOnlineUsers = () => {
   io.emit('online_users', users);
 };
 
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) return next();
+  const session = sessions.get(token);
+  if (!session || session.expires <= Date.now()) return next(new Error('Session expired'));
+  socket.data.account = session;
+  next();
+});
+
 io.on('connection', (socket) => {
+  if (socket.data.account) {
+    usersBySocket.set(socket.id, socket.data.account.name);
+    const timer = setTimeout(() => socket.disconnect(true), socket.data.account.expires - Date.now());
+    socket.once('disconnect', () => clearTimeout(timer));
+  }
   socket.emit('chat_message', createSystemMessage('Welcome to Orbit. Make yourself at home.'));
   emitOnlineUsers();
 
   socket.on('join_room', (rawName) => {
-    const name = String(rawName || '').trim().slice(0, 24) || 'Anonymous';
+    const guest = String(rawName || '').trim().slice(0, 24);
+    const name = socket.data.account?.name || (guest.startsWith('@') ? 'Guest' : guest || 'Anonymous');
     usersBySocket.set(socket.id, name);
     io.emit('chat_message', createSystemMessage(`${name} joined the room.`));
     emitOnlineUsers();
@@ -176,7 +213,7 @@ io.on('connection', (socket) => {
     io.to(userToCall).emit('call_user', {
       signal: payload.signalData,
       from: socket.id,
-      name: usersBySocket.get(socket.id) || payload.name || 'Anonymous',
+      name: usersBySocket.get(socket.id) || 'Anonymous',
     });
   });
 
@@ -223,6 +260,9 @@ io.on('connection', (socket) => {
 });
 
 const port = process.env.PORT === undefined ? 4000 : Number(process.env.PORT);
-server.listen(port, () => {
+ready.then(() => server.listen(port, () => {
   console.log(`Server listening on http://localhost:${server.address().port}`);
+})).catch(() => {
+  console.error('Account storage initialization failed. Check database configuration and connectivity.');
+  process.exitCode = 1;
 });
