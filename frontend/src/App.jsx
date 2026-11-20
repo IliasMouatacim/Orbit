@@ -57,6 +57,7 @@ function App() {
 
   const [name, setName] = useState('')
   const [mode, setMode] = useState('guest')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [accountError, setAccountError] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
@@ -408,7 +409,7 @@ function App() {
 
   const joinRoom = async (event) => {
     event.preventDefault()
-    const cleanName = name.trim().slice(0, 24)
+    const cleanName = mode === 'guest' ? name.trim().slice(0, 24) : name.trim()
     if (!cleanName || !connected) {
       return
     }
@@ -423,7 +424,7 @@ function App() {
         const response = await fetch(new URL('/accounts/' + mode, endpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: cleanName, password }),
+          body: JSON.stringify({ username: cleanName, email: mode === 'register' ? email.trim() : undefined, password }),
         })
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'Account request failed.')
@@ -431,6 +432,7 @@ function App() {
         socket.auth = { token: data.token }
         identityRef.current = data.name
         setName(data.name)
+        setEmail('')
         setPassword('')
         setJoined(true)
         socket.connect()
@@ -789,6 +791,8 @@ function App() {
             <form className="join-form" onSubmit={joinRoom}>
               <label htmlFor="account-mode">Access</label>
               <select id="account-mode" disabled={authBusy} value={mode} onChange={(event) => {
+                if (mode === 'login' && name.includes('@')) setName('')
+                setEmail('')
                 setMode(event.target.value)
                 setAccountError('')
                 setPassword('')
@@ -797,17 +801,22 @@ function App() {
                 <option value="login">Sign in</option>
                 <option value="register">Create account</option>
               </select>
-              <label htmlFor="display-name">{mode === 'guest' ? 'What should we call you?' : 'Username'}</label>
+              <label htmlFor="display-name">{mode === 'guest' ? 'What should we call you?' : mode === 'login' ? 'Username or email' : 'Username'}</label>
               <input
                 id="display-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Enter your display name"
-                maxLength={24}
+                placeholder={mode === 'guest' ? 'Enter your display name' : undefined}
+                maxLength={mode === 'login' ? 254 : 24}
                 autoComplete={mode === 'guest' ? 'nickname' : 'username'}
-                pattern={mode === 'guest' ? undefined : '[A-Za-z0-9_]{3,23}'}
+                pattern={mode === 'register' ? '[A-Za-z0-9_]{3,23}' : undefined}
                 required
               />
+              {mode === 'register' && <>
+                <label htmlFor="account-email">Email (optional)</label>
+                <input id="account-email" type="email" autoComplete="email" maxLength={254}
+                  value={email} onChange={(event) => setEmail(event.target.value)} />
+              </>}
               {mode !== 'guest' && <>
                 <label htmlFor="account-password">Password (at least 12 characters)</label>
                 <input id="account-password" type="password" minLength={12} required

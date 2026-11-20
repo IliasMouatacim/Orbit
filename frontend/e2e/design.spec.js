@@ -223,6 +223,8 @@ test('registered accounts can leave and sign in again with their reserved handle
   await page.goto('/')
   await page.getByLabel('Access', { exact: true }).selectOption('register')
   await page.getByLabel('Username').fill(username)
+  const email = username + '+orbit@example.com'
+  await page.getByLabel('Email (optional)').fill(email)
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Create account' }).click()
   await expect(page.locator('.sidebar-bottom strong')).toHaveText('@' + username)
@@ -231,7 +233,8 @@ test('registered accounts can leave and sign in again with their reserved handle
   await page.getByLabel('Username').fill(username)
   await page.getByLabel('Password').fill(password + 'wrong')
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('alert')).toHaveText('Incorrect username or password.')
+  await expect(page.getByRole('alert')).toHaveText('Incorrect username, email, or password.')
+  await page.getByLabel('Username or email').fill(email.toUpperCase())
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await send(page, 'Signed in again')

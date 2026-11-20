@@ -38,17 +38,29 @@ function openAccounts() {
   const db = createClient(remote
     ? { url: remote, authToken: process.env.TURSO_AUTH_TOKEN }
     : { url: pathToFileURL(path.join(dir, 'accounts.sqlite')).href });
-  const ready = db.execute('CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, record BLOB NOT NULL)');
+  const ready = db.batch([
+    'CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, record BLOB NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS account_emails (email_id TEXT PRIMARY KEY, account_id TEXT NOT NULL UNIQUE)',
+  ], 'write');
+  const emailId = email => crypto.createHmac('sha256', lookupKey).update('email:' + email).digest('hex');
   const sessions = new Map();
   const attempts = new Map();
   let busy = 0;
 
   async function authenticate(req, res) {
     res.set('Cache-Control', 'no-store');
-    const { username, password } = req.body || {};
-    if (typeof username !== 'string' || !/^[a-z0-9_]{3,23}$/i.test(username) ||
+    const { username, password, email } = req.body || {};
+    const register = req.path === '/accounts/register';
+    const identifier = typeof username === 'string' ? username.trim().toLowerCase() : '';
+    const emailLogin = !register && identifier.includes('@');
+    const address = emailLogin ? identifier : typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if ((emailLogin || (register && email !== undefined && email !== '')) &&
+        (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address) || address.length > 254)) {
+      return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+    if ((!emailLogin && !/^[a-z0-9_]{3,23}$/.test(identifier)) ||
         typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password) > 256) {
-      return res.status(400).json({ error: 'Use 3–23 letters, numbers or underscores and a password of 12–256 bytes (at least 12 characters).' });
+      return res.status(400).json({ error: 'Check your username or email and enter a password of at least 12 characters.' });
     }
     const ip = req.ip;
     if (busy >= 4 || (attempts.get(ip) || 0) >= 30) {
@@ -58,38 +70,49 @@ function openAccounts() {
     attempts.set(ip, (attempts.get(ip) || 0) + 1);
     busy++;
     try {
-      const name = '@' + username.toLowerCase();
-      const id = crypto.createHmac('sha256', lookupKey).update(name).digest('hex');
-      const register = req.path === '/accounts/register';
+      let name = '@' + identifier;
+      let id = crypto.createHmac('sha256', lookupKey).update(name).digest('hex');
       let salt = crypto.randomBytes(16);
       let expected;
       const row = register ? null : (await db.execute({
-        sql: 'SELECT record FROM accounts WHERE id = ?', args: [id],
+        sql: emailLogin
+          ? 'SELECT id, record FROM accounts JOIN account_emails ON account_id = id WHERE email_id = ?'
+          : 'SELECT id, record FROM accounts WHERE id = ?',
+        args: [emailLogin ? emailId(address) : id],
       })).rows[0];
       if (!register && row) {
+        id = row.id;
         const record = Buffer.from(row.record);
         const decipher = crypto.createDecipheriv('aes-256-gcm', recordKey, record.subarray(0, 12));
         decipher.setAAD(Buffer.from(id));
         decipher.setAuthTag(record.subarray(12, 28));
         const plain = Buffer.concat([decipher.update(record.subarray(28)), decipher.final()]);
         salt = plain.subarray(0, 16);
-        expected = plain.subarray(16);
+        expected = plain.subarray(16, 48);
+        if (emailLogin) name = plain.subarray(48).toString();
       }
       const hash = await derive(password, salt, 32, { N: 131072, r: 8, p: 1, maxmem: 160 * 1024 * 1024 });
       if (register) {
         const iv = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', recordKey, iv);
         cipher.setAAD(Buffer.from(id));
-        const body = Buffer.concat([cipher.update(Buffer.concat([salt, hash])), cipher.final()]);
-        const result = await db.execute({
-          sql: 'INSERT OR IGNORE INTO accounts (id, record) VALUES (?, ?)',
+        const body = Buffer.concat([cipher.update(Buffer.concat([salt, hash, Buffer.from(name)])), cipher.final()]);
+        const inserts = [{
+          sql: 'INSERT INTO accounts (id, record) VALUES (?, ?)',
           args: [id, Buffer.concat([iv, cipher.getAuthTag(), body])],
+        }];
+        if (address) inserts.push({
+          sql: 'INSERT INTO account_emails (email_id, account_id) VALUES (?, ?)',
+          args: [emailId(address), id],
         });
-        if (!result.rowsAffected) {
-          return res.status(409).json({ error: 'That account name is taken.' });
+        try {
+          await db.batch(inserts, 'write');
+        } catch (error) {
+          if (!String(error.code).startsWith('SQLITE_CONSTRAINT') && !error.message.includes('UNIQUE constraint failed')) throw error;
+          return res.status(409).json({ error: 'That username or email is already in use.' });
         }
       } else if (!expected || !crypto.timingSafeEqual(expected, hash)) {
-        return res.status(401).json({ error: 'Incorrect username or password.' });
+        return res.status(401).json({ error: 'Incorrect username, email, or password.' });
       }
       const token = crypto.randomBytes(32).toString('hex');
       const session = { name, expires: Date.now() + 8 * hour };
