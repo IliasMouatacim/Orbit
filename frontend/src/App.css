@@ -208,11 +208,17 @@
   position: relative;
 }
 .access-select select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   display: block;
   font-family: inherit;
   padding-inline-end: 44px;
   cursor: pointer;
+  background-color: #fafbf7;
+}
+.access-select select::-ms-expand {
+  display: none;
 }
 .access-select::after {
   content: '';
@@ -223,12 +229,13 @@
   height: 8px;
   border: solid var(--green);
   border-width: 0 2px 2px 0;
-  transform: translateY(-70%) rotate(45deg);
+  transform: translateY(-65%) rotate(45deg);
   pointer-events: none;
 }
 @media (forced-colors: active) {
-  .access-select select { appearance: auto; }
-  .access-select::after { display: none; }
+  .access-select::after {
+    border-color: CanvasText;
+  }
 }
 .join-form input::placeholder {
   color: #6e7964;
