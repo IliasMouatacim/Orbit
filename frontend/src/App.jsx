@@ -900,17 +900,19 @@ function App() {
             </p>
             <form className="join-form" onSubmit={joinRoom}>
               <label htmlFor="account-mode">Access</label>
-              <select id="account-mode" disabled={authBusy} value={mode} onChange={(event) => {
-                if (mode === 'login' && name.includes('@')) setName('')
-                setEmail('')
-                setMode(event.target.value)
-                setAccountError('')
-                setPassword('')
-              }}>
-                <option value="guest">Guest</option>
-                <option value="login">Sign in</option>
-                <option value="register">Create account</option>
-              </select>
+              <div className="access-select">
+                <select id="account-mode" disabled={authBusy} value={mode} onChange={(event) => {
+                  if (mode === 'login' && name.includes('@')) setName('')
+                  setEmail('')
+                  setMode(event.target.value)
+                  setAccountError('')
+                  setPassword('')
+                }}>
+                  <option value="guest">Guest</option>
+                  <option value="login">Sign in</option>
+                  <option value="register">Create account</option>
+                </select>
+              </div>
               <label htmlFor="display-name">{mode === 'guest' ? 'What should we call you?' : mode === 'login' ? 'Username or email' : 'Username'}</label>
               <input
                 id="display-name"
