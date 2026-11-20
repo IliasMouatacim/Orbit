@@ -13,6 +13,12 @@ const defaultIceServers = [
   { urls: 'stun:stun4.l.google.com:19302' },
 ]
 
+const ACCESS_OPTIONS = [
+  { value: 'guest', label: 'Guest' },
+  { value: 'login', label: 'Sign in' },
+  { value: 'register', label: 'Create account' },
+]
+
 const buildIceServers = () => {
   const {
     VITE_ICE_SERVERS,
@@ -64,6 +70,8 @@ function App() {
 
   const [name, setName] = useState('')
   const [mode, setMode] = useState('guest')
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false)
+  const accessMenuRef = useRef(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [accountError, setAccountError] = useState('')
@@ -436,6 +444,35 @@ function App() {
     media.addEventListener('change', onChange)
     return () => media.removeEventListener('change', onChange)
   }, [])
+
+  useEffect(() => {
+    if (!accessMenuOpen) return
+    const handleClickOutside = (event) => {
+      if (accessMenuRef.current && !accessMenuRef.current.contains(event.target)) {
+        setAccessMenuOpen(false)
+      }
+    }
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setAccessMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [accessMenuOpen])
+
+  const handleSelectMode = (nextMode) => {
+    if (nextMode === 'login' && name.includes('@')) setName('')
+    setEmail('')
+    setMode(nextMode)
+    setAccountError('')
+    setPassword('')
+    setAccessMenuOpen(false)
+  }
 
   useEffect(() => {
     if (!joined || !(receivingCall || stream || callAccepted)) return
@@ -900,18 +937,56 @@ function App() {
             </p>
             <form className="join-form" onSubmit={joinRoom}>
               <label htmlFor="account-mode">Access</label>
-              <div className="access-select">
-                <select id="account-mode" disabled={authBusy} value={mode} onChange={(event) => {
-                  if (mode === 'login' && name.includes('@')) setName('')
-                  setEmail('')
-                  setMode(event.target.value)
-                  setAccountError('')
-                  setPassword('')
-                }}>
+              <div className="access-select" ref={accessMenuRef}>
+                <select
+                  id="account-mode"
+                  disabled={authBusy}
+                  value={mode}
+                  onChange={(event) => handleSelectMode(event.target.value)}
+                  className="access-native-select"
+                  tabIndex={-1}
+                >
                   <option value="guest">Guest</option>
                   <option value="login">Sign in</option>
                   <option value="register">Create account</option>
                 </select>
+                <button
+                  type="button"
+                  id="account-mode-trigger"
+                  role="combobox"
+                  className={`access-trigger ${accessMenuOpen ? 'open' : ''}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={accessMenuOpen}
+                  aria-controls="account-mode-menu"
+                  aria-label="Access mode"
+                  disabled={authBusy}
+                  onClick={() => setAccessMenuOpen((prev) => !prev)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      setAccessMenuOpen(true)
+                    }
+                  }}
+                >
+                  <span>{ACCESS_OPTIONS.find((opt) => opt.value === mode)?.label || 'Guest'}</span>
+                  <span className="access-trigger-arrow" aria-hidden="true" />
+                </button>
+                {accessMenuOpen && (
+                  <ul id="account-mode-menu" className="access-menu" role="listbox" aria-label="Access">
+                    {ACCESS_OPTIONS.map((opt) => (
+                      <li
+                        key={opt.value}
+                        role="option"
+                        aria-selected={mode === opt.value}
+                        className={`access-menu-item ${mode === opt.value ? 'selected' : ''}`}
+                        onClick={() => handleSelectMode(opt.value)}
+                      >
+                        <span>{opt.label}</span>
+                        {mode === opt.value && <Icon name="check" size={15} />}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <label htmlFor="display-name">{mode === 'guest' ? 'What should we call you?' : mode === 'login' ? 'Username or email' : 'Username'}</label>
               <input
