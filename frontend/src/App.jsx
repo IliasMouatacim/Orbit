@@ -1,3 +1,4 @@
+import { createDevice, decryptText, encryptText, openRoom, safetyCode } from './chatCrypto'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
@@ -52,7 +53,11 @@ const buildIceServers = () => {
 
 function App() {
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
-  const socket = useMemo(() => io(apiUrl, { autoConnect: false }), [apiUrl])
+  const device = useMemo(createDevice, [])
+  const socket = useMemo(() => io(apiUrl, { autoConnect: false, auth: { publicKey: device.publicKey } }), [apiUrl, device])
+  const roomKeys = useRef(new Map())
+  const peers = useRef(new Map())
+  const sending = useRef(false)
   const iceServers = useMemo(() => buildIceServers(), [])
 
   const [name, setName] = useState('')
@@ -197,7 +202,16 @@ function App() {
     }
 
     const onOnlineUsers = (users) => {
-      setOnlineUsers(users)
+      const directory = new Map()
+      for (const user of users) {
+        if (!user.joined) continue
+        try {
+          const key = device.peerKey(user.id, user.publicKey)
+          directory.set(user.id, { ...user, key })
+        } catch { /* Invalid or substituted keys cannot receive messages. */ }
+      }
+      peers.current = directory
+      setOnlineUsers([...directory.values()])
     }
 
     const onUserTyping = (userName) => {
@@ -281,9 +295,30 @@ function App() {
       })
     }
 
-    socket.on('chat_message', onMessage)
-    socket.on('private_message', onPrivateMessage)
-    socket.on('room_message', onRoomMessage)
+    const seen = new Set()
+    const onEncrypted = packet => {
+      const { kind, from, to, target, nonce } = packet
+      const sender = peers.current.get(from)
+      const room = roomKeys.current.get(target)
+      if (!sender || (kind === 'room' ? !room : to !== socket.id)) return
+      try {
+        const text = decryptText(kind === 'room' ? room.key : sender.key, [kind, from, to], packet)
+        const id = from + ':' + nonce
+        if (seen.has(id)) return
+        seen.add(id)
+        const message = { id, from, to, text, user: sender.name, timestamp: packet.timestamp }
+        if (kind === 'room') onRoomMessage({ ...message, room: target })
+        else if (kind === 'global') onMessage(message)
+        else if (kind === 'direct') onPrivateMessage(message)
+      } catch { /* Never render unauthenticated text. */ }
+    }
+    const onSystem = message => { if (message.system === true) onMessage(message) }
+    const onRoomSystem = message => {
+      if (message.system === true && roomKeys.current.has(message.room)) onRoomMessage(message)
+    }
+    socket.on('encrypted_text', onEncrypted)
+    socket.on('chat_message', onSystem)
+    socket.on('room_message', onRoomSystem)
     socket.on('online_users', onOnlineUsers)
     socket.on('user_typing', onUserTyping)
     socket.on('user_stop_typing', onUserStopTyping)
@@ -299,9 +334,9 @@ function App() {
       clearTimeout(typingTimeoutRef.current)
       connectionRef.current?.close()
       streamRef.current?.getTracks().forEach((track) => track.stop())
-      socket.off('chat_message', onMessage)
-      socket.off('private_message', onPrivateMessage)
-      socket.off('room_message', onRoomMessage)
+      socket.off('chat_message', onSystem)
+      socket.off('encrypted_text', onEncrypted)
+      socket.off('room_message', onRoomSystem)
       socket.off('online_users', onOnlineUsers)
       socket.off('user_typing', onUserTyping)
       socket.off('user_stop_typing', onUserStopTyping)
@@ -311,7 +346,7 @@ function App() {
       socket.off('end_call', onEndCall)
       socket.disconnect()
     }
-  }, [socket])
+  }, [socket, device])
 
   useEffect(() => {
     if (listRef.current && nearBottomRef.current) {
@@ -429,7 +464,7 @@ function App() {
         const data = await response.json()
         if (!response.ok) throw new Error(data.error || 'Account request failed.')
         socket.disconnect()
-        socket.auth = { token: data.token }
+        socket.auth = { publicKey: device.publicKey, token: data.token }
         identityRef.current = data.name
         setName(data.name)
         setEmail('')
@@ -455,15 +490,16 @@ function App() {
 
   const joinPrivateRoom = (e) => {
     e.preventDefault()
-    const code = roomCodeInput
-      .trim()
-      .slice(0, 32)
-      .replace(/[^a-zA-Z0-9_-]/g, '')
     if (!connected) return
-    if (!code) {
-      setRoomError('Use letters, numbers, dashes, or underscores.')
+    let room
+    try {
+      room = openRoom(roomCodeInput)
+    } catch (error) {
+      setRoomError(error.message)
       return
     }
+    const code = room.id
+    roomKeys.current.set(code, room)
     setRoomError('')
 
     if (!joinedRooms.includes(code)) {
@@ -672,15 +708,33 @@ function App() {
     }
 
     nearBottomRef.current = true
-    if (activeChat === 'global') {
-      socket.emit('send_message', message)
-    } else if (activeChat.startsWith('room_')) {
-      const roomCode = activeChat.replace('room_', '')
-      socket.emit('send_room_message', { room: roomCode, text: message })
-    } else {
-      socket.emit('send_private_message', { to: activeChat, text: message })
+    if (sending.current) return
+    const from = socket.id
+    const kind = isRoom ? 'room' : isGlobal ? 'global' : 'direct'
+    const target = isRoom ? activeChat.slice(5) : activeChat
+    try {
+      const recipients = isGlobal ? [...peers.current.values()] :
+        isRoom ? [roomKeys.current.get(target)] : [peers.current.get(target)]
+      const deliveries = recipients.map(({ id, key }) => ({
+        to: id, ...encryptText(key, [kind, from, id], message),
+      }))
+      sending.current = true
+      socket.timeout(5000).emit('encrypted_text', { kind, target, deliveries }, (error, accepted) => {
+        sending.current = false
+        if (error || !accepted) {
+          setNotice('Delivery could not be confirmed. Your draft is available to retry.')
+          return
+        }
+        if (kind === 'direct' && target !== from) {
+          const sent = { id: from + ':' + deliveries[0].nonce, from, to: target, user: identityRef.current, text: message, timestamp: new Date().toISOString() }
+          setMessages(previous => ({ ...previous, [target]: [...(previous[target] || []), sent] }))
+        }
+        if (activeChatRef.current === activeChat) setDraft(value => value === draft ? '' : value)
+        else if (draftsRef.current[activeChat] === draft) draftsRef.current[activeChat] = ''
+      })
+    } catch {
+      setNotice('Encryption is unavailable. Your draft has been kept.')
     }
-    setDraft('')
   }
 
   // Helper to format typing text
@@ -698,24 +752,24 @@ function App() {
   const chatTitle = isGlobal
     ? 'Global Room'
     : isRoom
-      ? activeChat.slice(5)
+      ? roomKeys.current.get(activeChat.slice(5))?.label
       : peer?.name || 'Disconnected user'
   const chatIcon = isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'
-  const canSend = connected && (isGlobal || isRoom || Boolean(peer))
+  const canSend = connected && onlineUsers.some(user => user.id === socket.id) && (isGlobal || isRoom || Boolean(peer))
   const filteredUsers = onlineUsers.filter((user) =>
     user.name.toLowerCase().includes(search.toLowerCase()),
   )
   const filteredRooms = joinedRooms.filter((room) =>
-    room.toLowerCase().includes(search.toLowerCase()),
+    roomKeys.current.get(room)?.label.toLowerCase().includes(search.toLowerCase()),
   )
   const chatMessages = messages[activeChat] || []
   const copyRoomCode = async () => {
     try {
-      await navigator.clipboard.writeText(activeChat.slice(5))
+      await navigator.clipboard.writeText(roomKeys.current.get(activeChat.slice(5)).invite)
       setNotice('Room code copied. Share it with a friend!')
     } catch {
       setNotice(
-        `Your room code is ${activeChat.slice(5)}. Select it in the header to copy.`,
+        roomKeys.current.get(activeChat.slice(5)).invite,
       )
     }
   }
@@ -938,7 +992,7 @@ function App() {
                 <Icon name="hash" />
               </span>
               <span className="item-label">
-                {room}
+                {roomKeys.current.get(room)?.label}
                 <small>Room conversation</small>
               </span>
               {unread[`room_${room}`] > 0 && (
@@ -955,7 +1009,7 @@ function App() {
               className="room-input"
               placeholder="Enter room code"
               value={roomCodeInput}
-              maxLength={32}
+              maxLength={97}
               onChange={(event) => {
                 setRoomCodeInput(event.target.value)
                 setRoomError('')
@@ -975,7 +1029,7 @@ function App() {
               {roomError}
             </p>
           )}
-          <p className="room-hint">Use the same code to meet in a room.</p>
+          <p className="room-hint">Enter a name to create a room, or paste a private invitation.</p>
           <div className="menu-section-header people-heading">
             PEOPLE ONLINE <span>{onlineUsers.length}</span>
           </div>
@@ -1362,11 +1416,11 @@ function App() {
         <div className="details-rule" />
         <div className="details-note">
           <Icon name="spark" size={19} />
-          <h3>Make room for connection.</h3>
-          <p>
-            Say hello. Share something good. Give a new perspective a little
-            space.
-          </p>
+          <h3>{isGlobal ? 'Public conversation' : 'End-to-end encrypted text'}</h3>
+          <p>{isGlobal ? 'Anyone who joins can read public messages.' : isRoom ?
+            'Share your room invitation privately. Anyone with it can read messages in this room.' :
+            'Before sharing sensitive information, compare this safety code with the other person outside Orbit.'}</p>
+          {!isGlobal && !isRoom && peer && <code>{safetyCode(device.publicKey, peer.publicKey)}</code>}
         </div>
         {isRoom ? (
           <button className="secondary-button" onClick={copyRoomCode}>

@@ -64,7 +64,6 @@ test('search, room sharing, multiline messages, and separate chat drafts', async
   await page.getByPlaceholder('Type a message...').fill('My global draft')
   await joinRoom(page, 'Design Studio')
   await expect(page.getByPlaceholder('Type a message...')).toHaveValue('')
-  await joinRoom(friend, 'Design Studio')
   await page.bringToFront()
   await page
     .getByRole('button', { name: 'Copy room code', exact: true })
@@ -73,9 +72,9 @@ test('search, room sharing, multiline messages, and separate chat drafts', async
   await expect(
     page.getByText('Room code copied. Share it with a friend!'),
   ).toBeVisible()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    'DesignStudio',
-  )
+  const invitation = await page.evaluate(() => navigator.clipboard.readText())
+  expect(invitation).toMatch(/^DesignStudio~[0-9a-f]{64}$/)
+  await joinRoom(friend, invitation)
   await page.getByPlaceholder('Type a message...').fill('First line')
   await page.getByPlaceholder('Type a message...').press('Shift+Enter')
   await page
@@ -114,7 +113,7 @@ test('mobile navigation, focus containment, details and small screens', async ({
   ).toBeFocused()
   await page.getByRole('button', { name: 'Open navigation' }).click()
   await joinRoom(page, '!!!')
-  await expect(page.getByRole('alert')).toContainText('Use letters, numbers')
+  await expect(page.getByRole('alert')).toContainText('Enter a room name')
   await joinRoom(page, 'weekend')
   await expect(page.locator('#chat-navigation')).toBeHidden()
   await expect(page.locator('.chat-header h1')).toHaveText('weekend')
@@ -239,4 +238,27 @@ test('registered accounts can leave and sign in again with their reserved handle
   await page.getByRole('button', { name: 'Sign in' }).click()
   await send(page, 'Signed in again')
   await expect(page.getByText('Signed in again', { exact: true })).toBeVisible()
+})
+
+test('verified direct chat sends ciphertext over the relay', async ({ page, context }) => {
+  const traffic = []
+  page.on('websocket', ws => ws.on('framesent', frame => traffic.push(String(frame.payload))))
+  page.on('request', req => {
+    if (req.url().includes('/socket.io/')) traffic.push(req.postData() || '')
+  })
+  await join(page, 'Alice')
+  const friend = await context.newPage()
+  await join(friend, 'Bob')
+  await page.getByRole('button', { name: /Bob Here for a conversation/ }).click()
+  await friend.getByRole('button', { name: /Alice Here for a conversation/ }).click()
+  const code = page.locator('.details-note code')
+  await expect(code).toBeVisible()
+  await expect(friend.locator('.details-note code')).toHaveText(await code.innerText())
+  const text = 'Private message ' + randomUUID()
+  await send(page, text)
+  await expect(friend.getByText(text, { exact: true })).toBeVisible()
+  await expect(page.getByText(text, { exact: true })).toBeVisible()
+  expect(traffic.some(frame => frame.includes('encrypted_text'))).toBe(true)
+  expect(traffic.some(frame => frame.includes(text))).toBe(false)
+  await friend.close()
 })

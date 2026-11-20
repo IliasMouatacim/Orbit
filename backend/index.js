@@ -77,11 +77,16 @@ const emitOnlineUsers = () => {
   const users = Array.from(io.sockets.sockets.values()).map((client) => ({
     id: client.id,
     name: usersBySocket.get(client.id) || 'Anonymous',
+    publicKey: client.handshake.auth.publicKey,
+    joined: usersBySocket.has(client.id),
   }));
   io.emit('online_users', users);
 };
 
 io.use((socket, next) => {
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(socket.handshake.auth.publicKey || '')) {
+    return next(new Error('Refresh Orbit to use encrypted chat.'));
+  }
   const token = socket.handshake.auth.token;
   if (!token) return next();
   const session = sessions.get(token);
@@ -107,22 +112,6 @@ io.on('connection', (socket) => {
     emitOnlineUsers();
   });
 
-  socket.on('send_message', (rawText) => {
-    const text = String(rawText || '').trim().slice(0, 500);
-    if (!text) {
-      return;
-    }
-
-    const user = usersBySocket.get(socket.id) || 'Anonymous';
-    io.emit('chat_message', {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      user,
-      text,
-      from: socket.id,
-      timestamp: new Date().toISOString(),
-    });
-  });
-
   socket.on('join_private_room', (rawRoomCode) => {
     const roomCode = sanitizeRoomCode(rawRoomCode);
     if (!roomCode) {
@@ -138,54 +127,32 @@ io.on('connection', (socket) => {
 
     const user = usersBySocket.get(socket.id) || 'Anonymous';
     io.to(roomName).emit('room_message', {
-      ...createSystemMessage(`${user} joined room #${roomCode}.`),
+      ...createSystemMessage(`${user} joined the room.`),
       room: roomCode,
     });
   });
 
-  socket.on('send_room_message', (payload) => {
-    const roomCode = sanitizeRoomCode(payload && payload.room);
-    const text = String(payload && payload.text ? payload.text : '').trim().slice(0, 500);
-    if (!roomCode || !text) {
-      return;
+  socket.on('encrypted_text', (packet, reply) => {
+    if (typeof reply !== 'function') return;
+    const { kind, target, deliveries } = packet || {};
+    const user = usersBySocket.get(socket.id);
+    if (!user || !Array.isArray(deliveries) || !deliveries.length ||
+        !['global', 'room', 'direct'].includes(kind)) return reply(false);
+    if (kind === 'room' && (!roomsBySocket.get(socket.id)?.has(target) || deliveries.length !== 1)) return reply(false);
+    if (kind === 'direct' && (!usersBySocket.has(target) || deliveries.length !== 1)) return reply(false);
+    if (kind === 'global' && target !== 'global') return reply(false);
+    const timestamp = new Date().toISOString();
+    for (const entry of deliveries) {
+      if (!entry || typeof entry.nonce !== 'string' || !/^[A-Za-z0-9+/]{32}$/.test(entry.nonce) ||
+          typeof entry.box !== 'string' || entry.box.length > 8192 || !/^[A-Za-z0-9+/]{22,}={0,2}$/.test(entry.box) ||
+          (kind === 'global' && !usersBySocket.has(entry.to)) ||
+          (kind !== 'global' && entry.to !== target)) return reply(false);
     }
-
-    const userRooms = roomsBySocket.get(socket.id);
-    if (!userRooms || !userRooms.has(roomCode)) {
-      return;
+    for (const { to, nonce, box } of deliveries) {
+      const destination = kind === 'room' ? 'room:' + target : to;
+      io.to(destination).emit('encrypted_text', { kind, target, to, nonce, box, user, from: socket.id, timestamp });
     }
-
-    const roomName = `room:${roomCode}`;
-    const user = usersBySocket.get(socket.id) || 'Anonymous';
-    io.to(roomName).emit('room_message', {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      user,
-      text,
-      room: roomCode,
-      from: socket.id,
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  socket.on('send_private_message', (payload) => {
-    const to = String(payload && payload.to ? payload.to : '').trim();
-    const text = String(payload && payload.text ? payload.text : '').trim().slice(0, 500);
-    if (!to || !text || !io.sockets.sockets.has(to)) {
-      return;
-    }
-
-    const user = usersBySocket.get(socket.id) || 'Anonymous';
-    const message = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      user,
-      text,
-      from: socket.id,
-      to,
-      timestamp: new Date().toISOString(),
-    };
-
-    io.to(to).emit('private_message', message);
-    if (to !== socket.id) socket.emit('private_message', message);
+    reply(true);
   });
 
   socket.on('typing', () => {

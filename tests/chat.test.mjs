@@ -41,7 +41,7 @@ test('HTTP and realtime regression suite', async t => {
     assert.deepEqual(await response.json(), { status: 'ok' });
   });
   for (let i = 0; i < 3; i++) {
-    const client = io(url, { transports: ['websocket'], autoConnect: false });
+    const client = io(url, { auth: { publicKey: Buffer.alloc(32, i + 1).toString('base64') }, transports: ['websocket'], autoConnect: false });
     clients.push(client);
     const connected = event(client, 'connect'); client.connect(); await connected;
   }
@@ -52,31 +52,37 @@ test('HTTP and realtime regression suite', async t => {
     const presence = event(a, 'online_users', users => users.some(u => u.id === b.id && u.name === 'system'));
     b.emit('join_room', 'system'); await presence;
   });
-  await t.test('global messages preserve sender identity with duplicate names', async () => {
-    const received = event(b, 'chat_message', m => m.text === 'hello');
-    a.emit('send_message', ' hello ');
+  const delivery = to => ({ to, nonce: Buffer.alloc(24).toString('base64'), box: Buffer.alloc(64).toString('base64') });
+  async function relay(client, kind, target, recipients) {
+    return client.timeout(2000).emitWithAck('encrypted_text', { kind, target, deliveries: recipients.map(delivery) });
+  }
+  await t.test('global ciphertext preserves sender identity', async () => {
+    const received = event(b, 'encrypted_text');
+    assert.equal(await relay(a, 'global', 'global', [a.id, b.id]), true);
     const message = await received;
-    assert.equal(message.from, a.id); assert.equal(message.user, 'system'); assert.notEqual(message.system, true);
+    assert.equal(message.from, a.id); assert.equal(message.user, 'system');
+    assert.equal(message.text, undefined); assert.equal(message.box, delivery(b.id).box);
   });
-  await t.test('room normalization and membership enforcement', async () => {
+  await t.test('rooms enforce membership and isolate deliveries', async () => {
     for (const client of [a, b]) {
       const joined = event(client, 'room_message', m => m.room === 'testroom');
       client.emit('join_private_room', 'test room!'); await joined;
     }
-    const seen = []; b.on('room_message', m => seen.push(m.text));
-    outsider.emit('send_room_message', { room: 'testroom', text: 'unauthorized' });
-    const received = event(b, 'room_message', m => m.text === 'authorized');
-    a.emit('send_room_message', { room: 'testroom', text: 'authorized' });
+    outsider.emit('join_room', 'outsider');
+    const leaked = []; outsider.on('encrypted_text', m => leaked.push(m));
+    assert.equal(await relay(outsider, 'room', 'testroom', ['testroom']), false);
+    const received = event(b, 'encrypted_text');
+    assert.equal(await relay(a, 'room', 'testroom', ['testroom']), true);
     assert.equal((await received).from, a.id);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.ok(!seen.includes('unauthorized'));
+    await new Promise(resolve => setTimeout(resolve, 100)); assert.equal(leaked.length, 0);
   });
-  await t.test('direct messages reach only recipient and sender', async () => {
-    const leaked = []; outsider.on('private_message', m => leaked.push(m));
-    const received = event(b, 'private_message'); const echoed = event(a, 'private_message');
-    a.emit('send_private_message', { to: b.id, text: 'private' });
-    assert.equal((await received).text, 'private'); assert.equal((await echoed).to, b.id);
-    assert.equal(leaked.length, 0);
+  await t.test('direct ciphertext reaches only its recipient', async () => {
+    const leaked = []; outsider.on('encrypted_text', m => leaked.push(m));
+    const received = event(b, 'encrypted_text');
+    assert.equal(await relay(a, 'direct', b.id, [b.id]), true);
+    assert.equal((await received).to, b.id);
+    assert.equal(await relay(a, 'direct', 'room:testroom', ['room:testroom']), false);
+    await new Promise(resolve => setTimeout(resolve, 100)); assert.equal(leaked.length, 0);
   });
   await t.test('room names cannot be used as directed message or call targets', async () => {
     const leaked = [];
