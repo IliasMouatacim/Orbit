@@ -2,6 +2,7 @@ import { createDevice, decryptText, encryptText, openRoom, safetyCode } from './
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
+import { VerifyDevice } from './VerifyDevice'
 import { Brand, Icon } from './Icons'
 
 const defaultIceServers = [
@@ -57,6 +58,7 @@ function App() {
   const socket = useMemo(() => io(apiUrl, { autoConnect: false, auth: { publicKey: device.publicKey } }), [apiUrl, device])
   const roomKeys = useRef(new Map())
   const peers = useRef(new Map())
+  const [verified, setVerified] = useState(() => new Set())
   const sending = useRef(false)
   const iceServers = useMemo(() => buildIceServers(), [])
 
@@ -149,6 +151,7 @@ function App() {
     }
     const onDisconnect = (reason) => {
       setConnected(false)
+      setVerified(new Set())
       if (socket.auth?.token && (reason === 'io server disconnect' || reason?.message === 'Session expired')) {
         socket.auth = {}
         identityRef.current = ''
@@ -204,7 +207,7 @@ function App() {
     const onOnlineUsers = (users) => {
       const directory = new Map()
       for (const user of users) {
-        if (!user.joined) continue
+        if (!user.joined || (user.id !== socket.id && user.publicKey === device.publicKey)) continue
         try {
           const key = device.peerKey(user.id, user.publicKey)
           directory.set(user.id, { ...user, key })
@@ -309,7 +312,10 @@ function App() {
         const message = { id, from, to, text, user: sender.name, timestamp: packet.timestamp }
         if (kind === 'room') onRoomMessage({ ...message, room: target })
         else if (kind === 'global') onMessage(message)
-        else if (kind === 'direct') onPrivateMessage(message)
+        else if (kind === 'direct') onPrivateMessage({
+          ...message,
+          verificationCode: safetyCode([from, sender.name, sender.publicKey], [socket.id, identityRef.current, device.publicKey]),
+        })
       } catch { /* Never render unauthenticated text. */ }
     }
     const onSystem = message => { if (message.system === true) onMessage(message) }
@@ -695,7 +701,7 @@ function App() {
   const sendMessage = (event) => {
     event.preventDefault()
     const message = draft.trim()
-    if (!message || !joined || !canSend) {
+    if (!message || !joined || !canSendText) {
       return
     }
 
@@ -712,6 +718,11 @@ function App() {
     const from = socket.id
     const kind = isRoom ? 'room' : isGlobal ? 'global' : 'direct'
     const target = isRoom ? activeChat.slice(5) : activeChat
+    if (kind === 'direct') {
+      const currentPeer = peers.current.get(target)
+      if (!socket.connected || !currentPeer || currentPeer.publicKey !== peer.publicKey ||
+          currentPeer.name !== peer.name) return
+    }
     try {
       const recipients = isGlobal ? [...peers.current.values()] :
         isRoom ? [roomKeys.current.get(target)] : [peers.current.get(target)]
@@ -756,6 +767,12 @@ function App() {
       : peer?.name || 'Disconnected user'
   const chatIcon = isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'
   const canSend = connected && onlineUsers.some(user => user.id === socket.id) && (isGlobal || isRoom || Boolean(peer))
+  const localIdentity = [socket.id, identityRef.current, device.publicKey]
+  const peerIdentity = peer && [peer.id, peer.name, peer.publicKey]
+  const localCode = peer && safetyCode(localIdentity, peerIdentity)
+  const expectedCode = peer && safetyCode(peerIdentity, localIdentity)
+  const needsVerification = Boolean(peer && !verified.has(expectedCode))
+  const canSendText = canSend && !needsVerification
   const filteredUsers = onlineUsers.filter((user) =>
     user.name.toLowerCase().includes(search.toLowerCase()),
   )
@@ -1298,6 +1315,7 @@ function App() {
                         <div className="message-meta">
                           <span className="msg-author">
                             {isMine ? 'You' : msg.user}
+                            {msg.verificationCode && !verified.has(msg.verificationCode) && ' · Unverified device'}
                           </span>
                           <time dateTime={msg.timestamp} className="msg-time">
                             {new Date(msg.timestamp).toLocaleTimeString([], {
@@ -1328,6 +1346,10 @@ function App() {
           </div>
         </div>
         <div className="composer-area">
+          {needsVerification && connected && (
+            <VerifyDevice key={expectedCode} name={peer.name} localCode={localCode} expectedCode={expectedCode}
+              onVerify={() => setVerified(previous => new Set([...previous, expectedCode]))} />
+          )}
           <form className="composer" onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="message-draft">
               Message {chatTitle}
@@ -1355,7 +1377,7 @@ function App() {
             <button
               type="submit"
               aria-label="Send message"
-              disabled={!draft.trim() || !canSend}
+              disabled={!draft.trim() || !canSendText}
             >
               <Icon name="send" size={20} />
             </button>
@@ -1419,8 +1441,8 @@ function App() {
           <h3>{isGlobal ? 'Public conversation' : 'End-to-end encrypted text'}</h3>
           <p>{isGlobal ? 'Anyone who joins can read public messages.' : isRoom ?
             'Share your room invitation privately. Anyone with it can read messages in this room.' :
-            'Before sharing sensitive information, compare this safety code with the other person outside Orbit.'}</p>
-          {!isGlobal && !isRoom && peer && <code>{safetyCode(device.publicKey, peer.publicKey)}</code>}
+            peer && !needsVerification ? 'You verified this device. Your code is shown below so the other person can verify you.' : 'Exchange device codes outside Orbit before sending a direct message.'}</p>
+          {!isGlobal && !isRoom && peer && <code>{localCode}</code>}
         </div>
         {isRoom ? (
           <button className="secondary-button" onClick={copyRoomCode}>

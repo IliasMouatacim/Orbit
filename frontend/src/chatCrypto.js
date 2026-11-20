@@ -25,8 +25,8 @@ export function createDevice() {
   }
 }
 
-export function safetyCode(left, right) {
-  const input = JSON.stringify(['Orbit DM v1', ...[left, right].sort()])
+export function safetyCode(sender, recipient) {
+  const input = JSON.stringify(['Orbit DM verification v2', sender, recipient])
   return hex(nacl.hash(utf8.encode(input)).slice(0, 16)).match(/.{4}/g).join(' ')
 }
 
