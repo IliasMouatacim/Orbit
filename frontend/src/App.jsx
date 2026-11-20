@@ -1,4 +1,4 @@
-import { createDevice, decryptText, encryptText, openRoom, safetyCode } from './chatCrypto'
+import { createDevice, decryptText, encryptText, openRoom, openSignal, sealSignal, safetyCode } from './chatCrypto'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
@@ -53,7 +53,7 @@ const buildIceServers = () => {
 }
 
 function App() {
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000'
+  const apiUrl = import.meta.env.VITE_API_URL
   const device = useMemo(createDevice, [])
   const socket = useMemo(() => io(apiUrl, { autoConnect: false, auth: { publicKey: device.publicKey } }), [apiUrl, device])
   const roomKeys = useRef(new Map())
@@ -109,6 +109,7 @@ function App() {
   const activeChatRef = useRef('global')
   const localVideo = useRef(null)
   const remoteVideo = useRef(null)
+  const currentCall = useRef(null)
   const connectionRef = useRef(null)
   const iceCandidateQueue = useRef([])
   const remoteDescSet = useRef(false)
@@ -150,6 +151,7 @@ function App() {
       roomsRef.current.forEach((room) => socket.emit('join_private_room', room))
     }
     const onDisconnect = (reason) => {
+      onEndCall()
       setConnected(false)
       setVerified(new Set())
       if (socket.auth?.token && (reason === 'io server disconnect' || reason?.message === 'Session expired')) {
@@ -233,18 +235,30 @@ function App() {
       })
     }
 
+    const offers = new Set()
     const onCallUser = (data) => {
+      const sender = peers.current.get(data.from)
+      if (currentCall.current || !sender || !data.signal?.callId) return
+      const call = { id: data.signal.callId, peer: sender.id, key: sender.key }
+      const offer = openSignal(call, 'offer', sender.id, socket.id, data.signal)
+      if (offer?.type !== 'offer' || offers.has(call.id)) return
+      offers.add(call.id)
+      currentCall.current = call
       setReceivingCall(true)
       setCallEnded(false)
       setCaller(data.from)
-      setCallerName(data.name)
-      setCallerSignal(data.signal)
+      setCallerName(sender.name)
+      setCallerSignal(offer)
       setCallPartner(data.from)
       remoteDescSet.current = false
       iceCandidateQueue.current = [] // Clear any stale candidates
     }
 
-    const onCallAccepted = async (signal) => {
+    const onCallAccepted = async (packet) => {
+      const call = currentCall.current
+      if (!call) return
+      const signal = openSignal(call, 'answer', call.peer, socket.id, packet)
+      if (signal?.type !== 'answer' || connectionRef.current?.signalingState !== 'have-local-offer') return
       setCallAccepted(true)
       if (connectionRef.current) {
         await connectionRef.current.setRemoteDescription(
@@ -265,14 +279,18 @@ function App() {
     }
 
     const onIceCandidate = async (data) => {
+      const call = currentCall.current
+      if (!call || call.peer !== data.from) return
+      const candidate = openSignal(call, 'ice', data.from, socket.id, data.candidate)
+      if (!candidate) return
       if (!connectionRef.current || !remoteDescSet.current) {
-        iceCandidateQueue.current.push(data.candidate)
+        if (iceCandidateQueue.current.length < 128) iceCandidateQueue.current.push(candidate)
         return
       }
 
       try {
         await connectionRef.current.addIceCandidate(
-          new RTCIceCandidate(data.candidate),
+          new RTCIceCandidate(candidate),
         )
       } catch (e) {
         console.error('Error adding received ice candidate', e)
@@ -280,6 +298,7 @@ function App() {
     }
 
     const onEndCall = () => {
+      currentCall.current = null
       setCallEnded(true)
       if (connectionRef.current) {
         connectionRef.current.close()
@@ -539,6 +558,10 @@ function App() {
   }
 
   const callUser = async (idToCall) => {
+    const target = peers.current.get(idToCall)
+    if (!target || !verified.has(codeFor(target)) || currentCall.current) return
+    const call = { id: crypto.randomUUID(), peer: idToCall, key: target.key }
+    currentCall.current = call
     try {
       setCallError('')
       setCallEnded(false)
@@ -559,6 +582,10 @@ function App() {
       }
       const currentStream =
         await navigator.mediaDevices.getUserMedia(constraints)
+      if (currentCall.current !== call) {
+        currentStream.getTracks().forEach(track => track.stop())
+        return
+      }
       streamRef.current = currentStream
       setStream(currentStream)
       if (localVideo.current) localVideo.current.srcObject = currentStream
@@ -575,7 +602,7 @@ function App() {
         if (event.candidate) {
           socket.emit('ice_candidate', {
             to: idToCall,
-            candidate: event.candidate,
+            candidate: sealSignal(call, 'ice', socket.id, call.peer, event.candidate),
           })
         }
       }
@@ -592,7 +619,7 @@ function App() {
       await peer.setLocalDescription(offer)
       socket.emit('call_user', {
         userToCall: idToCall,
-        signalData: offer,
+        signalData: sealSignal(call, 'offer', socket.id, call.peer, offer),
         from: socket.id,
         name,
       })
@@ -606,6 +633,9 @@ function App() {
   }
 
   const answerCall = async () => {
+    const call = currentCall.current
+    const target = peers.current.get(caller)
+    if (!call || !target || !verified.has(codeFor(target))) return
     setCallError('')
     setCallAccepted(true)
     setCallEnded(false)
@@ -625,6 +655,10 @@ function App() {
       }
       const currentStream =
         await navigator.mediaDevices.getUserMedia(constraints)
+      if (currentCall.current !== call) {
+        currentStream.getTracks().forEach(track => track.stop())
+        return
+      }
       streamRef.current = currentStream
       setStream(currentStream)
       if (localVideo.current) localVideo.current.srcObject = currentStream
@@ -641,7 +675,7 @@ function App() {
         if (event.candidate) {
           socket.emit('ice_candidate', {
             to: caller,
-            candidate: event.candidate,
+            candidate: sealSignal(call, 'ice', socket.id, call.peer, event.candidate),
           })
         }
       }
@@ -667,7 +701,7 @@ function App() {
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
 
-      socket.emit('answer_call', { signal: answer, to: caller })
+      socket.emit('answer_call', { signal: sealSignal(call, 'answer', socket.id, call.peer, answer), to: caller })
     } catch (err) {
       leaveCall()
       setCallError(
@@ -678,12 +712,14 @@ function App() {
   }
 
   const leaveCall = () => {
+    const call = currentCall.current
+    currentCall.current = null
     setCallEnded(true)
     if (connectionRef.current) {
       connectionRef.current.close()
     }
-    if (callPartner) {
-      socket.emit('end_call', { to: callPartner })
+    if (call) {
+      socket.emit('end_call', { to: call.peer })
     }
     connectionRef.current = null
     remoteDescSet.current = false
@@ -770,7 +806,10 @@ function App() {
   const localIdentity = [socket.id, identityRef.current, device.publicKey]
   const peerIdentity = peer && [peer.id, peer.name, peer.publicKey]
   const localCode = peer && safetyCode(localIdentity, peerIdentity)
-  const expectedCode = peer && safetyCode(peerIdentity, localIdentity)
+  const codeFor = user => safetyCode([user.id, user.name, user.publicKey], localIdentity)
+  const expectedCode = peer && codeFor(peer)
+  const incomingPeer = peers.current.get(caller)
+  const incomingVerified = incomingPeer && verified.has(codeFor(incomingPeer))
   const needsVerification = Boolean(peer && !verified.has(expectedCode))
   const canSendText = canSend && !needsVerification
   const filteredUsers = onlineUsers.filter((user) =>
@@ -1168,7 +1207,7 @@ function App() {
               <button
                 className="icon-button call-btn"
                 onClick={() => callUser(activeChat)}
-                disabled={Boolean(callPartner) || !canSend}
+                disabled={Boolean(callPartner) || !canSendText}
                 title="Start Video Call"
                 aria-label="Start Video Call"
               >
@@ -1501,8 +1540,11 @@ function App() {
             <p>
               <strong>{callerName}</strong> is calling you...
             </p>
+            {incomingPeer && !incomingVerified && <VerifyDevice name={incomingPeer.name}
+              localCode={safetyCode(localIdentity, [caller, incomingPeer.name, incomingPeer.publicKey])}
+              expectedCode={codeFor(incomingPeer)} onVerify={() => setVerified(previous => new Set([...previous, codeFor(incomingPeer)]))} />}
             <div className="call-actions">
-              <button className="accept-btn" onClick={answerCall}>
+              <button className="accept-btn" onClick={answerCall} disabled={!incomingVerified}>
                 Accept
               </button>
               <button className="decline-btn" onClick={leaveCall}>
@@ -1528,9 +1570,7 @@ function App() {
                 ref={remoteVideo}
                 autoPlay
                 className="remote-video"
-                style={{
-                  display: callAccepted && !callEnded ? 'block' : 'none',
-                }}
+                hidden={!callAccepted || callEnded}
               />
               {!(callAccepted && !callEnded) && (
                 <div className="calling-placeholder">

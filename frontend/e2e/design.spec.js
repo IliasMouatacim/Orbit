@@ -182,7 +182,17 @@ test('video call dialogs and permission errors remain usable', async ({
   await page
     .getByRole('button', { name: /Maya Here for a conversation/ })
     .click()
+  await friend.getByRole('button', { name: /Ilias Here for a conversation/ }).click()
+  const callerCode = await page.locator('.verify-device code').innerText()
+  const calleeCode = await friend.locator('.verify-device code').innerText()
+  await expect(page.getByRole('button', { name: 'Start Video Call' })).toBeDisabled()
+  await page.getByLabel('Their verification code').fill(calleeCode)
+  await page.getByRole('button', { name: 'Verify device' }).click()
   await page.getByRole('button', { name: 'Start Video Call' }).click()
+  const incoming = friend.getByRole('dialog', { name: 'Incoming Video Call' })
+  await expect(incoming.getByRole('button', { name: 'Accept' })).toBeDisabled()
+  await incoming.getByLabel('Their verification code').fill(callerCode)
+  await incoming.getByRole('button', { name: 'Verify device' }).click()
   await friend.getByRole('button', { name: 'Accept', exact: true }).click()
   await expect(
     page.getByRole('dialog', { name: 'Video call', exact: true }),
@@ -237,7 +247,7 @@ test('registered accounts can leave and sign in again with their reserved handle
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await send(page, 'Signed in again')
-  await expect(page.getByText('Signed in again', { exact: true })).toBeVisible()
+  await expect(page.getByRole('log').getByText('Signed in again', { exact: true })).toBeVisible()
 })
 
 test('verified direct chat sends ciphertext over the relay', async ({ page, context }) => {

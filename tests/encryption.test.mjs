@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createDevice, decryptText, encryptText, openRoom } from '../frontend/src/chatCrypto.js'
+import { createDevice, decryptText, encryptText, openRoom, openSignal, sealSignal } from '../frontend/src/chatCrypto.js'
 
 test('only the intended device can authenticate a DM in its original context', () => {
   const alice = createDevice(), bob = createDevice(), outsider = createDevice()
@@ -23,4 +23,17 @@ test('room labels and routing identifiers cannot recover an invitation key', () 
   for (const input of ['Friends', room.id]) {
     assert.throws(() => decryptText(openRoom(input).key, context, packet))
   }
+})
+
+test('call negotiation is bound to the device pair, call ID, direction, and signal type', () => {
+  const alice = createDevice(), bob = createDevice()
+  const call = { id: 'call-one', key: alice.peerKey('bob', bob.publicKey) }
+  const recipient = { id: call.id, key: bob.peerKey('alice', alice.publicKey) }
+  const offer = { type: 'offer', sdp: 'private session description' }
+  const packet = sealSignal(call, 'offer', 'alice', 'bob', offer)
+  assert.ok(!JSON.stringify(packet).includes(offer.sdp))
+  assert.deepEqual(openSignal(recipient, 'offer', 'alice', 'bob', packet), offer)
+  assert.equal(openSignal(recipient, 'answer', 'alice', 'bob', packet), null)
+  assert.equal(openSignal(recipient, 'offer', 'bob', 'alice', packet), null)
+  assert.equal(openSignal({ ...recipient, id: 'call-two' }, 'offer', 'alice', 'bob', packet), null)
 })

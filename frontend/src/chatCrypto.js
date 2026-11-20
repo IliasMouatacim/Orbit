@@ -1,6 +1,10 @@
 import nacl from 'tweetnacl'
 
-const encode = bytes => btoa(String.fromCharCode(...bytes))
+const encode = bytes => {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return btoa(binary)
+}
 const decode = value => Uint8Array.from(atob(value), c => c.charCodeAt(0))
 const utf8 = new TextEncoder()
 const hex = bytes => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
@@ -47,12 +51,23 @@ export function encryptText(key, context, text) {
   return { nonce: encode(nonce), box: encode(nacl.secretbox(content, nonce, key)) }
 }
 
-export function decryptText(key, context, packet) {
+export function decryptText(key, context, packet, maxLength = 500) {
   const bytes = nacl.secretbox.open(decode(packet.box), decode(packet.nonce), key)
   if (!bytes) throw new Error('Message authentication failed')
   const fields = JSON.parse(new TextDecoder().decode(bytes))
   const text = fields.pop()
   if (JSON.stringify(fields) !== JSON.stringify(['Orbit text v1', ...context]) ||
-      typeof text !== 'string' || text.length > 500) throw new Error('Invalid message')
+      typeof text !== 'string' || text.length > maxLength) throw new Error('Invalid message')
   return text
+}
+
+export function sealSignal(call, type, from, to, data) {
+  return { callId: call.id, ...encryptText(call.key, ['call', call.id, type, from, to], JSON.stringify(data)) }
+}
+
+export function openSignal(call, type, from, to, packet) {
+  if (packet?.callId !== call.id || typeof packet.box !== 'string' || packet.box.length > 131072) return null
+  try {
+    return JSON.parse(decryptText(call.key, ['call', call.id, type, from, to], packet, 65536))
+  } catch { return null }
 }

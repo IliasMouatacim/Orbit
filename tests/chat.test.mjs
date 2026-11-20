@@ -95,11 +95,12 @@ test('HTTP and realtime regression suite', async t => {
     await new Promise(resolve => setTimeout(resolve, 150)); assert.deepEqual(leaked, []);
   });
   await t.test('call offer, answer, ICE and hangup relay', async () => {
-    let received = event(b, 'call_user'); a.emit('call_user', { userToCall: b.id, signalData: { type: 'offer' } });
+    const signal = { callId: '12345678-1234-1234-1234-123456789012', ...delivery(b.id) };
+    let received = event(b, 'call_user'); a.emit('call_user', { userToCall: b.id, signalData: signal });
     assert.equal((await received).from, a.id);
-    received = event(a, 'call_accepted'); b.emit('answer_call', { to: a.id, signal: { type: 'answer' } });
-    assert.equal((await received).type, 'answer');
-    received = event(b, 'ice_candidate'); a.emit('ice_candidate', { to: b.id, candidate: { candidate: 'test' } });
+    received = event(a, 'call_accepted'); b.emit('answer_call', { to: a.id, signal });
+    assert.equal((await received).callId, signal.callId);
+    received = event(b, 'ice_candidate'); a.emit('ice_candidate', { to: b.id, candidate: signal });
     assert.equal((await received).from, a.id);
     received = event(a, 'end_call'); b.emit('end_call', { to: a.id }); await received;
   });

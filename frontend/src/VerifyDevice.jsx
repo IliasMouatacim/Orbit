@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 export function VerifyDevice({ name, localCode, expectedCode, onVerify }) {
+  const fieldId = useId()
   const [error, setError] = useState('')
   function verify(event) {
     event.preventDefault()
@@ -13,12 +14,12 @@ export function VerifyDevice({ name, localCode, expectedCode, onVerify }) {
   }
   return (
     <form className="verify-device" onSubmit={verify}>
-      <strong>Verify {name} before sending a direct message</strong>
+      <strong>Verify {name} to chat or call</strong>
       <p>Exchange codes in person or through a trusted channel outside Orbit. Give them your code:</p>
       <code>{localCode}</code>
-      <label htmlFor="peer-code">Their verification code</label>
+      <label htmlFor={fieldId}>Their verification code</label>
       <div>
-        <input id="peer-code" name="code" required autoComplete="off" spellCheck={false}
+        <input id={fieldId} name="code" required autoComplete="off" spellCheck={false}
           onChange={() => setError('')} maxLength={80} />
         <button className="secondary-button" type="submit">Verify device</button>
       </div>

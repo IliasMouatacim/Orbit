@@ -1,43 +1,29 @@
 const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
 const { createClient } = require('@libsql/client');
-const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 
 const derive = promisify(crypto.scrypt);
 const hour = 3600000;
 
 function openAccounts() {
-  const dir = process.env.ACCOUNT_DATA_DIR || path.join(__dirname, '.accounts');
   const remote = process.env.TURSO_DATABASE_URL;
-  if (remote || process.env.TURSO_AUTH_TOKEN || process.env.RENDER === 'true') {
-    if (!/^(libsql|https):\/\//.test(remote || '') || !process.env.TURSO_AUTH_TOKEN) {
-      throw new Error('Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN for hosted account storage.');
+  const hosted = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+  if (hosted || remote || process.env.TURSO_AUTH_TOKEN) {
+    const endpoint = new URL(remote || 'about:blank');
+    if (!['libsql:', 'https:'].includes(endpoint.protocol) || !endpoint.hostname ||
+        endpoint.search || endpoint.username || endpoint.password || !process.env.TURSO_AUTH_TOKEN) {
+      throw new Error('Configure a secure Turso endpoint and database token.');
     }
-  } else {
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  let key;
-  if (remote || process.env.ACCOUNT_KEY || process.env.NODE_ENV === 'production') {
     if (!/^[0-9a-f]{64}$/i.test(process.env.ACCOUNT_KEY || '')) {
       throw new Error('Set ACCOUNT_KEY to a 32-byte hex key.');
     }
-    key = Buffer.from(process.env.ACCOUNT_KEY, 'hex');
-  } else {
-    const file = path.join(dir, 'development.key');
-    try {
-      fs.writeFileSync(file, crypto.randomBytes(32), { flag: 'wx', mode: 0o600 });
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-    }
-    key = fs.readFileSync(file);
   }
+  const key = remote ? Buffer.from(process.env.ACCOUNT_KEY, 'hex') : crypto.randomBytes(32);
   const lookupKey = crypto.hkdfSync('sha256', key, '', 'orbit account lookup', 32);
   const recordKey = crypto.hkdfSync('sha256', key, '', 'orbit account records', 32);
   const db = createClient(remote
     ? { url: remote, authToken: process.env.TURSO_AUTH_TOKEN }
-    : { url: pathToFileURL(path.join(dir, 'accounts.sqlite')).href });
+    : { url: ':memory:' });
   const ready = db.batch([
     'CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, record BLOB NOT NULL)',
     'CREATE TABLE IF NOT EXISTS account_emails (email_id TEXT PRIMARY KEY, account_id TEXT NOT NULL UNIQUE)',
@@ -63,7 +49,7 @@ function openAccounts() {
       return res.status(400).json({ error: 'Check your username or email and enter a password of at least 12 characters.' });
     }
     const ip = req.ip;
-    if (busy >= 4 || (attempts.get(ip) || 0) >= 30) {
+    if (busy >= 2 || (attempts.get(ip) || 0) >= 30) {
       return res.status(429).json({ error: 'Too many attempts. Try again later.' });
     }
     if (!attempts.has(ip)) setTimeout(() => attempts.delete(ip), 10 * 60000).unref();
