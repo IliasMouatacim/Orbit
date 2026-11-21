@@ -1766,10 +1766,6 @@
   }
 }
 
-.verify-device { display: grid; gap: .4rem; margin-bottom: .7rem; font-size: .9rem; }
-.verify-device p { margin: 0; }
-.verify-device code, .details-note code { overflow-wrap: anywhere; }
-.verify-device > div { display: flex; flex-wrap: wrap; gap: .4rem; }
-.verify-device input { flex: 1 1 10rem; min-width: 0; border: 1px solid var(--line); border-radius: .5rem; padding: .5rem; }
+.details-note code { overflow-wrap: anywhere; }
 
 .remote-video[hidden] { display: none; }

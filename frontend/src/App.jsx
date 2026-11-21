@@ -1,8 +1,7 @@
-import { createDevice, decryptText, encryptText, openRoom, openSignal, sealSignal, safetyCode } from './chatCrypto'
+import { createDevice, decryptText, encryptText, openRoom, openSignal, sealSignal } from './chatCrypto'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
-import { VerifyDevice } from './VerifyDevice'
 import { Brand, Icon } from './Icons'
 
 const defaultIceServers = [
@@ -18,6 +17,18 @@ const ACCESS_OPTIONS = [
   { value: 'login', label: 'Sign in' },
   { value: 'register', label: 'Create account' },
 ]
+
+const loadSavedSession = () => {
+  try {
+    const raw = localStorage.getItem('orbit_session')
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.name === 'string' && typeof parsed.token === 'string') {
+      return parsed
+    }
+  } catch {}
+  return null
+}
 
 const buildIceServers = () => {
   const {
@@ -60,15 +71,21 @@ const buildIceServers = () => {
 
 function App() {
   const apiUrl = import.meta.env.VITE_API_URL
+  const savedSession = useRef(loadSavedSession())
   const device = useMemo(createDevice, [])
-  const socket = useMemo(() => io(apiUrl, { autoConnect: false, auth: { publicKey: device.publicKey } }), [apiUrl, device])
+  const socket = useMemo(() => io(apiUrl, {
+    autoConnect: false,
+    auth: {
+      publicKey: device.publicKey,
+      token: savedSession.current?.token,
+    },
+  }), [apiUrl, device])
   const roomKeys = useRef(new Map())
   const peers = useRef(new Map())
-  const [verified, setVerified] = useState(() => new Set())
   const sending = useRef(false)
   const iceServers = useMemo(() => buildIceServers(), [])
 
-  const [name, setName] = useState('')
+  const [name, setName] = useState(() => savedSession.current?.name || '')
   const [mode, setMode] = useState('guest')
   const [accessMenuOpen, setAccessMenuOpen] = useState(false)
   const accessMenuRef = useRef(null)
@@ -76,7 +93,7 @@ function App() {
   const [password, setPassword] = useState('')
   const [accountError, setAccountError] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
-  const [joined, setJoined] = useState(false)
+  const [joined, setJoined] = useState(() => Boolean(savedSession.current?.token))
   const [messages, setMessages] = useState({ global: [] })
   const [activeChat, setActiveChat] = useState('global')
   const [unread, setUnread] = useState({})
@@ -123,7 +140,7 @@ function App() {
   const remoteDescSet = useRef(false)
 
   const [ownSocketIds, setOwnSocketIds] = useState(() => new Set())
-  const identityRef = useRef(null)
+  const identityRef = useRef(savedSession.current?.name || null)
   const roomsRef = useRef([])
   const streamRef = useRef(null)
   const draftsRef = useRef({})
@@ -161,11 +178,14 @@ function App() {
     const onDisconnect = (reason) => {
       onEndCall()
       setConnected(false)
-      setVerified(new Set())
       if (socket.auth?.token && (reason === 'io server disconnect' || reason?.message === 'Session expired')) {
-        socket.auth = {}
+        try { localStorage.removeItem('orbit_session') } catch {}
+        socket.auth = { publicKey: device.publicKey }
         identityRef.current = ''
-        window.location.reload()
+        setName('')
+        setJoined(false)
+        setAccountError('Your session has expired. Please sign in again.')
+        return
       }
     }
     socket.on('disconnect', onDisconnect)
@@ -339,10 +359,7 @@ function App() {
         const message = { id, from, to, text, user: sender.name, timestamp: packet.timestamp }
         if (kind === 'room') onRoomMessage({ ...message, room: target })
         else if (kind === 'global') onMessage(message)
-        else if (kind === 'direct') onPrivateMessage({
-          ...message,
-          verificationCode: safetyCode([from, sender.name, sender.publicKey], [socket.id, identityRef.current, device.publicKey]),
-        })
+        else if (kind === 'direct') onPrivateMessage(message)
       } catch { /* Never render unauthenticated text. */ }
     }
     const onSystem = message => { if (message.system === true) onMessage(message) }
@@ -528,6 +545,9 @@ function App() {
         socket.disconnect()
         socket.auth = { publicKey: device.publicKey, token: data.token }
         identityRef.current = data.name
+        try {
+          localStorage.setItem('orbit_session', JSON.stringify({ name: data.name, token: data.token }))
+        } catch {}
         setName(data.name)
         setEmail('')
         setPassword('')
@@ -596,7 +616,7 @@ function App() {
 
   const callUser = async (idToCall) => {
     const target = peers.current.get(idToCall)
-    if (!target || !verified.has(codeFor(target)) || currentCall.current) return
+    if (!target || currentCall.current) return
     const call = { id: crypto.randomUUID(), peer: idToCall, key: target.key }
     currentCall.current = call
     try {
@@ -672,7 +692,7 @@ function App() {
   const answerCall = async () => {
     const call = currentCall.current
     const target = peers.current.get(caller)
-    if (!call || !target || !verified.has(codeFor(target))) return
+    if (!call || !target) return
     setCallError('')
     setCallAccepted(true)
     setCallEnded(false)
@@ -774,7 +794,7 @@ function App() {
   const sendMessage = (event) => {
     event.preventDefault()
     const message = draft.trim()
-    if (!message || !joined || !canSendText) {
+    if (!message || !joined || !canSend) {
       return
     }
 
@@ -840,15 +860,6 @@ function App() {
       : peer?.name || 'Disconnected user'
   const chatIcon = isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'
   const canSend = connected && onlineUsers.some(user => user.id === socket.id) && (isGlobal || isRoom || Boolean(peer))
-  const localIdentity = [socket.id, identityRef.current, device.publicKey]
-  const peerIdentity = peer && [peer.id, peer.name, peer.publicKey]
-  const localCode = peer && safetyCode(localIdentity, peerIdentity)
-  const codeFor = user => safetyCode([user.id, user.name, user.publicKey], localIdentity)
-  const expectedCode = peer && codeFor(peer)
-  const incomingPeer = peers.current.get(caller)
-  const incomingVerified = incomingPeer && verified.has(codeFor(incomingPeer))
-  const needsVerification = Boolean(peer && !verified.has(expectedCode))
-  const canSendText = canSend && !needsVerification
   const filteredUsers = onlineUsers.filter((user) =>
     user.name.toLowerCase().includes(search.toLowerCase()),
   )
@@ -1236,6 +1247,11 @@ function App() {
                   return
                 }
               }
+              try { localStorage.removeItem('orbit_session') } catch {}
+              socket.auth = { publicKey: device.publicKey }
+              identityRef.current = ''
+              setName('')
+              setJoined(false)
               window.location.reload()
             }}
           >
@@ -1284,7 +1300,7 @@ function App() {
               <button
                 className="icon-button call-btn"
                 onClick={() => callUser(activeChat)}
-                disabled={Boolean(callPartner) || !canSendText}
+                disabled={Boolean(callPartner) || !canSend}
                 title="Start Video Call"
                 aria-label="Start Video Call"
               >
@@ -1431,7 +1447,6 @@ function App() {
                         <div className="message-meta">
                           <span className="msg-author">
                             {isMine ? 'You' : msg.user}
-                            {msg.verificationCode && !verified.has(msg.verificationCode) && ' · Unverified device'}
                           </span>
                           <time dateTime={msg.timestamp} className="msg-time">
                             {new Date(msg.timestamp).toLocaleTimeString([], {
@@ -1462,10 +1477,6 @@ function App() {
           </div>
         </div>
         <div className="composer-area">
-          {needsVerification && connected && (
-            <VerifyDevice key={expectedCode} name={peer.name} localCode={localCode} expectedCode={expectedCode}
-              onVerify={() => setVerified(previous => new Set([...previous, expectedCode]))} />
-          )}
           <form className="composer" onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="message-draft">
               Message {chatTitle}
@@ -1493,7 +1504,7 @@ function App() {
             <button
               type="submit"
               aria-label="Send message"
-              disabled={!draft.trim() || !canSendText}
+              disabled={!draft.trim() || !canSend}
             >
               <Icon name="send" size={20} />
             </button>
@@ -1557,8 +1568,7 @@ function App() {
           <h3>{isGlobal ? 'Public conversation' : 'End-to-end encrypted text'}</h3>
           <p>{isGlobal ? 'Anyone who joins can read public messages.' : isRoom ?
             'Share your room invitation privately. Anyone with it can read messages in this room.' :
-            peer && !needsVerification ? 'You verified this device. Your code is shown below so the other person can verify you.' : 'Exchange device codes outside Orbit before sending a direct message.'}</p>
-          {!isGlobal && !isRoom && peer && <code>{localCode}</code>}
+            'Messages between you and ' + (peer?.name || 'this contact') + ' are end-to-end encrypted directly on your devices.'}</p>
         </div>
         {isRoom ? (
           <button className="secondary-button" onClick={copyRoomCode}>
@@ -1617,11 +1627,8 @@ function App() {
             <p>
               <strong>{callerName}</strong> is calling you...
             </p>
-            {incomingPeer && !incomingVerified && <VerifyDevice name={incomingPeer.name}
-              localCode={safetyCode(localIdentity, [caller, incomingPeer.name, incomingPeer.publicKey])}
-              expectedCode={codeFor(incomingPeer)} onVerify={() => setVerified(previous => new Set([...previous, codeFor(incomingPeer)]))} />}
             <div className="call-actions">
-              <button className="accept-btn" onClick={answerCall} disabled={!incomingVerified}>
+              <button className="accept-btn" onClick={answerCall}>
                 Accept
               </button>
               <button className="decline-btn" onClick={leaveCall}>
