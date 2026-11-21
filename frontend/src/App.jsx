@@ -1143,7 +1143,7 @@ function App() {
         <footer className="welcome-footer">
 
           {import.meta.env.MODE !== 'desktop' && (
-            <a href="https://github.com/IliasMouatacim/Orbit/releases/latest/download/orbit-chat-windows-x64.zip">Download for Windows (x64)</a>
+            <a href="/downloads/orbit-chat-windows-x64.zip" download>Download for Windows (x64)</a>
           )}
         </footer>
       </main>

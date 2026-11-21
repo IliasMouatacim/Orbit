@@ -1,6 +1,6 @@
 # Orbit Chat for Windows
 
-Extract the Windows build artifact and launch `orbit-chat.exe`. The executable includes Orbit’s interface and opens its own window even when offline. Messaging, account access and calls require connectivity to the Orbit chat server. Windows 10 or 11 x64 needs Microsoft's Evergreen WebView2 Runtime.
+Download the [portable Windows ZIP](../frontend/public/downloads/orbit-chat-windows-x64.zip), extract all files to one folder and launch `orbit-chat.exe`. The executable includes Orbit’s interface and opens its own window even when offline. Messaging, account access and calls require connectivity to the Orbit chat server. Windows 10 or 11 x64 needs Microsoft's Evergreen WebView2 Runtime.
 
 ## Build
 
