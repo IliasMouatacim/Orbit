@@ -51,7 +51,15 @@ jobs:
             } until ($app.MainWindowTitle -eq 'Orbit Chat' -or (Get-Date) -gt $deadline)
             if ($app.MainWindowTitle -ne 'Orbit Chat') { throw 'Orbit window did not appear.' }
           } finally { if (!$app.HasExited) { $app.Kill() } }
-      - run: python desktop/package-native.py windows-build orbit-native-windows-test.zip
+      - name: Package the Windows application and its native runtime
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $crt = Get-Item "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT\vcruntime140.dll" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (!$crt) { throw 'Visual C++ x64 redistributable runtime missing.' }
+          Copy-Item $crt.FullName windows-build
+          python desktop/package-native.py windows-build orbit-native-windows-test.zip
       - uses: actions/upload-artifact@v4
         with:
           name: orbit-native-windows-test-build

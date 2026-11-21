@@ -86,9 +86,10 @@ internal sealed class MainWindow : Form
         {
             if (!stack.Enabled || string.IsNullOrWhiteSpace(name.Text)) return;
             stack.Enabled = false; status.Text = "Connecting…";
-            var next = new Chat();
+            Chat? next = null;
             try
             {
+                next = new Chat();
                 string handle = name.Text.Trim();
                 if (mode.SelectedIndex == 0 && (handle.Length > 24 || handle.StartsWith('@'))) throw new ArgumentException("Choose a guest name of up to 24 characters without a leading @.");
                 if (mode.SelectedIndex != 0)
@@ -109,7 +110,7 @@ internal sealed class MainWindow : Form
                 calls.Status += message => { status.Text = message; UpdateActions(); };
                 password.Clear(); ShowWorkspace();
             }
-            catch { next.Dispose(); token = null; status.Text = "Unable to join."; throw; }
+            catch { next?.Dispose(); token = null; status.Text = "Unable to join."; throw; }
             finally { stack.Enabled = true; }
         });
         mode.SelectedIndexChanged += (_, _) => Mode();
