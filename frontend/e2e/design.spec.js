@@ -17,6 +17,20 @@ const joinRoom = async (page, room) => {
   await page.getByPlaceholder('Enter room code').fill(room)
   await page.getByRole('button', { name: 'Join private room' }).click()
 }
+const verifyDevices = async (page, friend) => {
+  const panel = tab => tab.locator('.verify-device')
+  const own = await panel(page).locator('code').innerText()
+  const other = await panel(friend).locator('code').innerText()
+  await expect(page.getByRole('button', { name: 'Start Video Call' })).toBeDisabled()
+  await panel(page).getByLabel('Their code').fill(own)
+  await panel(page).getByRole('button').click()
+  await expect(panel(page)).toBeVisible()
+  for (const [tab, code] of [[page, other], [friend, own]]) {
+    await panel(tab).getByLabel('Their code').fill(code)
+    await panel(tab).getByRole('button').click()
+    await expect(panel(tab)).toHaveCount(0)
+  }
+}
 const checkAccessibility = async (page) => {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') })
   const violations = await page.evaluate(async () => {
@@ -55,6 +69,15 @@ test('search, room sharing, multiline messages, and separate chat drafts', async
   await join(friend, 'Maya')
   await send(friend, 'Hello, Orbit!')
   await expect(page.getByText('Hello, Orbit!', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Search this conversation' }).click()
+  const messageSearch = page.getByRole('textbox', { name: 'Search messages or senders' })
+  await messageSearch.fill('hello, orbit')
+  await expect(page.getByRole('status').filter({ hasText: '1 match' })).toBeVisible()
+  await messageSearch.fill('missing message')
+  await expect(page.getByRole('log').getByText('Hello, Orbit!')).toHaveCount(0)
+  await messageSearch.press('Escape')
+  await page.keyboard.press('Control+k')
+  await expect(page.getByPlaceholder('Find people or rooms')).toBeFocused()
   await page.getByPlaceholder('Find people or rooms').fill('nobodyxyz')
   await expect(page.getByText('No matches for “nobodyxyz”')).toBeVisible()
   await page
@@ -183,8 +206,9 @@ test('video call dialogs and permission errors remain usable', async ({
     .getByRole('button', { name: /Maya Here for a conversation/ })
     .click()
   await friend.getByRole('button', { name: /Ilias Here for a conversation/ }).click()
+  await verifyDevices(page, friend)
   await page.getByRole('button', { name: 'Start Video Call' }).click()
-  const incoming = friend.getByRole('dialog', { name: 'Incoming Video Call' })
+  await expect(friend.getByRole('dialog', { name: 'Incoming Video Call' })).toBeVisible()
   await friend.getByRole('button', { name: 'Accept', exact: true }).click()
   await expect(
     page.getByRole('dialog', { name: 'Video call', exact: true }),
@@ -255,6 +279,7 @@ test('direct chat sends ciphertext over the relay', async ({ page, context }) =>
   await join(friend, 'Bob')
   await page.getByRole('button', { name: /Bob Here for a conversation/ }).click()
   await friend.getByRole('button', { name: /Alice Here for a conversation/ }).click()
+  await verifyDevices(page, friend)
   const text = 'Private message ' + randomUUID()
   const draft = page.getByPlaceholder('Type a message...')
   await draft.fill(text)

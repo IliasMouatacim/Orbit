@@ -1,4 +1,4 @@
-import { createDevice, decryptText, encryptText, openRoom, openSignal, sealSignal } from './chatCrypto'
+import { createDevice, decryptText, encryptText, openRoom, openSignal, safetyCode, sealSignal } from './chatCrypto'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import './App.css'
@@ -55,7 +55,7 @@ const enforceHighQualityVideo = async (peer) => {
       enc.scaleResolutionDownBy = 1.0
     })
     await videoSender.setParameters(params)
-  } catch {}
+  } catch { /* This optional browser feature may be unavailable. */ }
 }
 
 const ACCESS_OPTIONS = [
@@ -66,13 +66,14 @@ const ACCESS_OPTIONS = [
 
 const loadSavedSession = () => {
   try {
-    const raw = localStorage.getItem('orbit_session')
+    localStorage.removeItem('orbit_session') // Retire credentials saved by older clients.
+    const raw = sessionStorage.getItem('orbit_session')
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed.name === 'string' && typeof parsed.token === 'string') {
       return parsed
     }
-  } catch {}
+  } catch { /* This optional browser feature may be unavailable. */ }
   return null
 }
 
@@ -117,7 +118,8 @@ const buildIceServers = () => {
 
 function App() {
   const apiUrl = import.meta.env.VITE_API_URL
-  const savedSession = useRef(loadSavedSession())
+  const [initialSession] = useState(loadSavedSession)
+  const savedSession = useRef(initialSession)
   const device = useMemo(createDevice, [])
   const socket = useMemo(() => io(apiUrl, {
     autoConnect: false,
@@ -150,6 +152,9 @@ function App() {
   const [detailsOpen, setDetailsOpen] = useState(
     () => window.innerWidth >= 1200,
   )
+  const searchRef = useRef(null)
+  const [messageSearch, setMessageSearch] = useState(null)
+  const messageSearchButton = useRef(null)
   const [search, setSearch] = useState('')
   const [roomError, setRoomError] = useState('')
   const [notice, setNotice] = useState('')
@@ -193,6 +198,19 @@ function App() {
   const draftsRef = useRef({})
   const nearBottomRef = useRef(true)
 
+  useEffect(() => {
+    if (!joined || isMobile) return
+    const focusSearch = event => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !document.querySelector('[aria-modal="true"]')) {
+        event.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+      }
+    }
+    window.addEventListener('keydown', focusSearch)
+    return () => window.removeEventListener('keydown', focusSearch)
+  }, [joined, isMobile])
+
   const closeNavigation = () => {
     setSidebarOpen(false)
     if (isMobile)
@@ -210,6 +228,7 @@ function App() {
     isTypingRef.current = false
     activeChatRef.current = chat
     setActiveChat(chat)
+    setMessageSearch(null)
     closeNavigation()
     setNotice('')
     setUnread((prev) => ({ ...prev, [chat]: 0 }))
@@ -226,12 +245,12 @@ function App() {
       onEndCall()
       setConnected(false)
       if (socket.auth?.token && (reason === 'io server disconnect' || reason?.message === 'Session expired')) {
-        try { localStorage.removeItem('orbit_session') } catch {}
+        try { sessionStorage.removeItem('orbit_session') } catch { /* This optional browser feature may be unavailable. */ }
         socket.auth = { publicKey: device.publicKey }
         identityRef.current = ''
         setName('')
         setJoined(false)
-        setAccountError('Your session has expired. Please sign in again.')
+        window.location.reload() // Discard transcripts, room keys and device identity.
         return
       }
     }
@@ -287,7 +306,14 @@ function App() {
         if (!user.joined || (user.id !== socket.id && user.publicKey === device.publicKey)) continue
         try {
           const key = device.peerKey(user.id, user.publicKey)
-          directory.set(user.id, { ...user, key })
+          const local = [socket.id, identityRef.current, device.publicKey]
+          const remote = [user.id, user.name, user.publicKey]
+          const outgoing = safetyCode(local, remote)
+          const incoming = safetyCode(remote, local)
+          const previous = peers.current.get(user.id)
+          directory.set(user.id, { ...user, key, outgoing, incoming,
+            verified: previous?.incoming === incoming && previous.verified })
+
         } catch { /* Invalid or substituted keys cannot receive messages. */ }
       }
       peers.current = directory
@@ -313,7 +339,7 @@ function App() {
     const offers = new Set()
     const onCallUser = (data) => {
       const sender = peers.current.get(data.from)
-      if (currentCall.current || !sender || !data.signal?.callId) return
+      if (currentCall.current || !sender?.verified || !data.signal?.callId) return
       const call = { id: data.signal.callId, peer: sender.id, key: sender.key }
       const offer = openSignal(call, 'offer', sender.id, socket.id, data.signal)
       if (offer?.type !== 'offer' || offers.has(call.id)) return
@@ -395,7 +421,7 @@ function App() {
         if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
           document.exitFullscreen().catch(() => {})
         }
-      } catch {}
+      } catch { /* This optional browser feature may be unavailable. */ }
     }
 
     const seen = new Set()
@@ -403,7 +429,7 @@ function App() {
       const { kind, from, to, target, nonce } = packet
       const sender = peers.current.get(from)
       const room = roomKeys.current.get(target)
-      if (!sender || (kind === 'room' ? !room : to !== socket.id)) return
+      if (!sender || (kind === 'direct' && !sender.verified) || (kind === 'room' ? !room : to !== socket.id)) return
       try {
         const text = decryptText(kind === 'room' ? room.key : sender.key, [kind, from, to], packet)
         const id = from + ':' + nonce
@@ -530,7 +556,7 @@ function App() {
       } else {
         document.exitFullscreen?.().catch(() => {})
       }
-    } catch {}
+    } catch { /* This optional browser feature may be unavailable. */ }
   }
 
   useEffect(() => {
@@ -617,8 +643,8 @@ function App() {
         socket.auth = { publicKey: device.publicKey, token: data.token }
         identityRef.current = data.name
         try {
-          localStorage.setItem('orbit_session', JSON.stringify({ name: data.name, token: data.token }))
-        } catch {}
+          sessionStorage.setItem('orbit_session', JSON.stringify({ name: data.name, token: data.token }))
+        } catch { /* This optional browser feature may be unavailable. */ }
         setName(data.name)
         setEmail('')
         setPassword('')
@@ -687,12 +713,12 @@ function App() {
 
   const callUser = async (idToCall) => {
     const target = peers.current.get(idToCall)
-    if (!target || currentCall.current) return
+    if (!target?.verified || currentCall.current) return
     try {
       if (typeof document !== 'undefined' && !document.fullscreenElement && document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(() => {})
       }
-    } catch {}
+    } catch { /* This optional browser feature may be unavailable. */ }
     const call = { id: crypto.randomUUID(), peer: idToCall, key: target.key }
     currentCall.current = call
     try {
@@ -768,7 +794,7 @@ function App() {
       if (typeof document !== 'undefined' && !document.fullscreenElement && document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(() => {})
       }
-    } catch {}
+    } catch { /* This optional browser feature may be unavailable. */ }
     setCallError('')
     setCallAccepted(true)
     setCallEnded(false)
@@ -864,7 +890,7 @@ function App() {
       if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {})
       }
-    } catch {}
+    } catch { /* This optional browser feature may be unavailable. */ }
   }
 
   const sendMessage = (event) => {
@@ -889,7 +915,7 @@ function App() {
     const target = isRoom ? activeChat.slice(5) : activeChat
     if (kind === 'direct') {
       const currentPeer = peers.current.get(target)
-      if (!socket.connected || !currentPeer || currentPeer.publicKey !== peer.publicKey ||
+      if (!socket.connected || !currentPeer?.verified || currentPeer.publicKey !== peer.publicKey ||
           currentPeer.name !== peer.name) return
     }
     try {
@@ -935,7 +961,7 @@ function App() {
       ? roomKeys.current.get(activeChat.slice(5))?.label
       : peer?.name || 'Disconnected user'
   const chatIcon = isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'
-  const canSend = connected && onlineUsers.some(user => user.id === socket.id) && (isGlobal || isRoom || Boolean(peer))
+  const canSend = connected && onlineUsers.some(user => user.id === socket.id) && (isGlobal || isRoom || peer?.verified)
   const filteredUsers = onlineUsers.filter((user) =>
     user.name.toLowerCase().includes(search.toLowerCase()),
   )
@@ -943,6 +969,13 @@ function App() {
     roomKeys.current.get(room)?.label.toLowerCase().includes(search.toLowerCase()),
   )
   const chatMessages = messages[activeChat] || []
+  const query = messageSearch?.trim().toLowerCase()
+  const visibleMessages = query ? chatMessages.filter(message => !message.system &&
+    (message.text.toLowerCase().includes(query) || message.user.toLowerCase().includes(query))) : chatMessages
+  const closeMessageSearch = () => {
+    setMessageSearch(null)
+    messageSearchButton.current?.focus()
+  }
   const copyRoomCode = async () => {
     try {
       await navigator.clipboard.writeText(roomKeys.current.get(activeChat.slice(5)).invite)
@@ -960,24 +993,14 @@ function App() {
         <header className="welcome-nav">
           <Brand />
           <span className="nav-note">
-            A little closer, wherever you are <Icon name="globe" size={16} />
+            <span className="status-dot" /> {connected ? 'Connected to Orbit' : 'Connecting…'}
           </span>
         </header>
         <div className="welcome-content">
           <section className="welcome-story">
-            <span className="eyebrow">
-              <span className="status-dot" /> GOOD CONVERSATIONS START HERE
-            </span>
-            <h1>
-              Your people.
-              <br />
-              Your space.
-              <br />
-              <em>Your orbit.</em>
-            </h1>
+            <h1>Your chat<br /><em>workspace.</em></h1>
             <p className="welcome-description">
-              A place for quick hellos and conversations that go somewhere. Drop
-              in, find your people, and make yourself at home.
+              Join the global conversation, invite friends to a private room, or start a verified direct call.
             </p>
             <div className="welcome-features">
               <span>
@@ -1012,11 +1035,9 @@ function App() {
             <span className="card-icon">
               <Icon name="spark" size={26} />
             </span>
-            <span className="eyebrow">COME ON IN</span>
+
             <h2 id="join-heading">
-              A conversation
-              <br />
-              is waiting.
+              Open Orbit
             </h2>
             <p>
               Join as a guest or use your account.
@@ -1115,13 +1136,15 @@ function App() {
             </div>
             <div className="join-card-footer">
               <Icon name="people" size={18} />
-              <span>Be yourself. Be kind. Say hello.</span>
+              <span>Guest names are temporary. Sign in to keep your handle.</span>
             </div>
           </section>
         </div>
         <footer className="welcome-footer">
-          <span>Less scrolling. More connecting.</span>
-          <a href="/downloads/orbit-chat-windows-x64.zip" download>Download for Windows (x64)</a>
+
+          {import.meta.env.MODE !== 'desktop' && (
+            <a href="https://github.com/IliasMouatacim/Orbit/releases/latest/download/orbit-chat-windows-x64.zip">Download for Windows (x64)</a>
+          )}
         </footer>
       </main>
     )
@@ -1165,11 +1188,14 @@ function App() {
         <label className="search-field">
           <Icon name="search" size={17} />
           <input
+            ref={searchRef}
+            aria-keyshortcuts="Control+K Meta+K"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Find people or rooms"
             aria-label="Find people or rooms"
           />
+          {!search && !isMobile && <kbd aria-hidden="true">{navigator.platform.includes('Mac') ? '⌘ K' : 'Ctrl K'}</kbd>}
           {search && (
             <button
               className="clear-search"
@@ -1323,7 +1349,7 @@ function App() {
                   return
                 }
               }
-              try { localStorage.removeItem('orbit_session') } catch {}
+              try { sessionStorage.removeItem('orbit_session') } catch { /* This optional browser feature may be unavailable. */ }
               socket.auth = { publicKey: device.publicKey }
               identityRef.current = ''
               setName('')
@@ -1372,6 +1398,11 @@ function App() {
             </p>
           </div>
           <div className="header-actions">
+            <button ref={messageSearchButton} className="icon-button" aria-label="Search this conversation"
+              aria-expanded={messageSearch !== null} title="Search this conversation"
+              onClick={() => setMessageSearch(value => value === null ? '' : null)}>
+              <Icon name="search" />
+            </button>
             {!isGlobal && !isRoom && (
               <button
                 className="icon-button call-btn"
@@ -1403,6 +1434,16 @@ function App() {
             </button>
           </div>
         </header>
+        {messageSearch !== null && (
+          <div className="message-search" role="search" aria-label="Conversation search">
+            <Icon name="search" size={16} />
+            <input autoFocus aria-label="Search messages or senders" placeholder="Search messages or senders"
+              value={messageSearch} onChange={event => setMessageSearch(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Escape') closeMessageSearch() }} />
+            {query && <span role="status">{visibleMessages.length} {visibleMessages.length === 1 ? 'match' : 'matches'}</span>}
+            <button className="icon-button" aria-label="Close message search" onClick={closeMessageSearch}><Icon name="close" /></button>
+          </div>
+        )}
         {!connected && (
           <div className="connection-banner" role="status">
             Connection interrupted. We’ll reconnect automatically. Your draft is
@@ -1451,7 +1492,7 @@ function App() {
             aria-live="polite"
             aria-relevant="additions text"
           >
-            <div className="conversation-intro">
+            <div className="conversation-intro" hidden={Boolean(query)}>
               <span className="intro-icon">
                 <Icon name={chatIcon} size={30} />
               </span>
@@ -1482,7 +1523,7 @@ function App() {
                 </span>
               )}
             </div>
-            {chatMessages.map((msg, index) => {
+            {visibleMessages.map((msg, index) => {
               const isSystem = msg.system === true
               const isMine = ownSocketIds.has(msg.from) && !isSystem
               const day = new Date(msg.timestamp).toLocaleDateString(
@@ -1492,7 +1533,7 @@ function App() {
               const previousDay =
                 index > 0
                   ? new Date(
-                      chatMessages[index - 1].timestamp,
+                      visibleMessages[index - 1].timestamp,
                     ).toLocaleDateString(undefined, {
                       month: 'long',
                       day: 'numeric',
@@ -1553,6 +1594,29 @@ function App() {
           </div>
         </div>
         <div className="composer-area">
+          {peer && !peer.verified && (
+            <form key={peer.incoming} className="verify-device" onSubmit={event => {
+              event.preventDefault()
+              const field = event.currentTarget.elements.code
+              const current = peers.current.get(peer.id)
+              if (!current || current.incoming !== peer.incoming) return
+              if (field.value.toLowerCase().replace(/\s/g, '') !== current.incoming.replaceAll(' ', '')) {
+                field.setCustomValidity('The codes differ. Check the code with your contact.')
+                field.reportValidity()
+                return
+              }
+              peers.current.set(peer.id, { ...current, verified: true })
+              setOnlineUsers([...peers.current.values()])
+            }}>
+              <strong>Verify {peer.name}’s device</strong>
+              <p>Exchange codes over a separate trusted channel to enable direct messages and calls.</p>
+              <span>Your code</span><code>{peer.outgoing}</code>
+              <label htmlFor="peer-code">Their code</label>
+              <div><input id="peer-code" name="code" required autoComplete="off" spellCheck={false}
+                onChange={event => event.target.setCustomValidity('')} /><button className="secondary-button">Verify device</button></div>
+            </form>
+          )}
+          {peer?.verified && <p className="verified-note">Device verified · Encrypted conversation</p>}
           <form className="composer" onSubmit={sendMessage}>
             <label className="sr-only" htmlFor="message-draft">
               Message {chatTitle}
@@ -1573,7 +1637,7 @@ function App() {
                 }
               }}
               placeholder={
-                canSend ? 'Type a message...' : 'Waiting for connection…'
+                connected && peer && !peer.verified ? 'Verify this device to send…' : canSend ? 'Type a message...' : 'Waiting for connection…'
               }
               maxLength={500}
             />

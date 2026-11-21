@@ -1,0 +1,57 @@
+name: Build Orbit for Windows
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix frontend
+      - run: npm run build --prefix desktop
+      - run: cargo build --locked --release --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Test launch and package portable app
+        shell: pwsh
+        run: |
+          $exe = 'desktop/src-tauri/target/release/orbit-chat.exe'
+          $app = Start-Process $exe -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            do {
+              Start-Sleep -Milliseconds 500
+              $app.Refresh()
+              if ($app.HasExited) { throw 'Orbit exited during startup' }
+            } until ($app.MainWindowTitle -eq 'Orbit Chat' -or (Get-Date) -ge $deadline)
+            if ($app.MainWindowTitle -ne 'Orbit Chat') { throw 'Orbit window failed to open' }
+          } finally { if (!$app.HasExited) { $app.Kill() } }
+          Compress-Archive -Path $exe -DestinationPath orbit-chat-windows-x64.zip
+          $hash = (Get-FileHash orbit-chat-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  orbit-chat-windows-x64.zip" | Set-Content SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            orbit-chat-windows-x64.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+      - name: Publish Windows download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" orbit-chat-windows-x64.zip SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --verify-tag --title "Orbit Chat $GITHUB_REF_NAME for Windows" --notes "Download and extract orbit-chat-windows-x64.zip, then launch orbit-chat.exe on Windows 10 or 11 x64. Requires Microsoft Edge WebView2 Runtime. The executable is unsigned."

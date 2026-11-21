@@ -1810,3 +1810,27 @@
 .details-note code { overflow-wrap: anywhere; }
 
 .remote-video[hidden] { display: none; }
+
+.verify-device {
+  padding: 16px;
+  margin-bottom: 10px;
+  border: 1px solid #c4d4c7;
+  border-radius: 12px;
+  background: #eef4ed;
+  color: #263d36;
+  max-height: 36dvh;
+  overflow-y: auto;
+}
+.verify-device p, .verified-note { font-size: 13px; margin: 6px 0; }
+.verify-device label, .verify-device > span { display: block; font-size: 12px; margin: 8px 0 4px; }
+.verify-device code { user-select: all; overflow-wrap: anywhere; }
+.verify-device div { display: flex; gap: 8px; flex-wrap: wrap; }
+.verify-device input { flex: 1 1 12em; border: 1px solid #78897d; border-radius: 6px; padding: 6px; }
+.verify-device button { width: auto; padding: 0 12px; background: #34543e; color: white; }
+.verified-note { color: #395a44; }
+.search-field kbd { font-size: 10px; white-space: nowrap; color: #cdd9c9; border: 1px solid #829284; border-radius: 4px; padding: 2px 4px; }
+
+.message-search { display: flex; align-items: center; gap: 8px; padding: 4px 16px; border-bottom: 1px solid var(--line); }
+.message-search input { flex: 1; padding: 8px; background: transparent; color: var(--ink); border: 0; }
+.message-search span { font-size: 12px; }
+.conversation-intro[hidden] { display: none; }

@@ -1,15 +1,15 @@
 # Orbit Chat for Windows
 
-On Windows 10 or 11 x64, extract the ZIP and open orbit-chat.exe. Install Microsoft's Evergreen WebView2 Runtime if startup reports that it is missing. Internet access is required. Camera and microphone access use WebView2 and Windows privacy settings.
+Extract the Windows build artifact and launch `orbit-chat.exe`. The executable includes Orbit’s interface and opens its own window even when offline. Messaging, account access and calls require connectivity to the Orbit chat server. Windows 10 or 11 x64 needs Microsoft's Evergreen WebView2 Runtime.
 
-The desktop client loads the hosted Orbit Chat interface. The TypeScript startup page handles offline launch. The Rust shell restricts top-level navigation to the app and chat origins, blocks popups, and exposes no custom native commands. The standalone executable is unsigned.
+## Build
 
-## Build on Windows
+Install Node.js 24, Rust stable for x86_64-pc-windows-msvc, and Visual Studio Build Tools with the Desktop development with C++ workload. From the repository root run:
 
-Install Node.js, Rust stable for x86_64-pc-windows-msvc, and Visual Studio Build Tools with the Desktop development with C++ workload. From the project folder run:
+    npm ci --prefix frontend
+    npm run build --prefix desktop
+    cargo build --locked --release --manifest-path desktop/src-tauri/Cargo.toml
 
-    npm install
-    npm run build
-    cargo build --locked --release --manifest-path src-tauri/Cargo.toml
+The portable executable is `desktop/src-tauri/target/release/orbit-chat.exe`. The Build Orbit for Windows workflow tests that the application opens a window on Windows, packages the executable and generates its SHA-256 checksum. Pushing a version tag publishes the ZIP and checksum to GitHub Releases. Manual workflow runs produce build artifacts only.
 
-The executable is src-tauri/target/release/orbit-chat.exe.
+The build uses the frontend's default HTTPS API, or the HTTPS origin set in VITE_API_URL at build time. Include `https://tauri.localhost` alongside existing web origins in the deployed backend's comma-separated CLIENT_ORIGIN setting. The Render blueprint includes it.

@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import process from 'node:process'
 
 export default defineConfig(({ command, mode }) => {
+  const desktop = mode === 'desktop'
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   const productionBuild = command === 'build'
   const fallback = productionBuild ? 'https://chattingapp-n4ig.onrender.com' : 'http://localhost:4000'
@@ -14,6 +15,10 @@ export default defineConfig(({ command, mode }) => {
   const websocket = new URL(api.origin)
   websocket.protocol = 'wss:'
   return {
+    ...(desktop ? {
+      publicDir: false,
+      build: { outDir: '../desktop/dist', emptyOutDir: true },
+    } : {}),
     define: { 'import.meta.env.VITE_API_URL': JSON.stringify(api.origin) },
     plugins: [
       react(),

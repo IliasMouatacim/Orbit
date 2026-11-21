@@ -10,7 +10,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: CLIENT_ORIGIN
-        value: https://chattingapp-kappa.vercel.app
+        value: https://chattingapp-kappa.vercel.app,https://tauri.localhost
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION
