@@ -18,3 +18,11 @@ With the local backend running on port 4000, run:
 The integration check creates two independent native client sessions. It checks encrypted global, room and direct messages, voice and video negotiation, bidirectional decoding of generated audio and video, and remote hangup. The Windows workflow also checks that the application opens a window. Use two Windows machines with microphones, speakers and cameras to verify capture, playback, visible remote video and hangup before replacing the public download.
 
 The signaling and text protocol is shared with the web client. Each native sign-in uses a new device key and stores account tokens only in memory. The native client returns to the join screen on disconnection.
+
+## Windows publisher identity
+
+Manual runs of **Native Windows checks** on `main` also produce `orbit-signed-windows-x64` after Windows verifies the timestamped Authenticode signature in the final ZIP. Use that artifact for distribution. The automatic branch and pull-request builds produce unsigned test packages.
+
+To enable signing, create or reuse a Microsoft Artifact Signing **Public Trust** certificate profile with a validated publisher identity. Give the signing application the certificate profile signer role scoped to that profile. Configure a GitHub Actions federated credential in Microsoft Entra ID for subject `repo:IliasMouatacim/Orbit:environment:windows-signing` and audience `api://AzureADTokenExchange`. Restrict the GitHub environment `windows-signing` to deployments from `main`.
+
+Set these variables in the GitHub environment: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SIGNING_ENDPOINT` (the account's regional HTTPS endpoint), `SIGNING_ACCOUNT` and `SIGNING_PROFILE`. Authentication uses GitHub OIDC. SmartScreen evaluates download reputation separately from publisher identity.

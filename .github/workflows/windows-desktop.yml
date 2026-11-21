@@ -64,3 +64,57 @@ jobs:
         with:
           name: orbit-native-windows-test-build
           path: orbit-native-windows-test.zip
+  sign:
+    name: Sign Windows download
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: native
+    runs-on: windows-2022
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: orbit-native-windows-test-build
+      - name: Extract tested executable
+        shell: pwsh
+        run: |
+          $zip = [IO.Compression.ZipFile]::OpenRead("$PWD/orbit-native-windows-test.zip")
+          try {
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($zip.GetEntry('OrbitChat.exe'), "$PWD/OrbitChat.exe")
+          } finally { $zip.Dispose() }
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\OrbitChat.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Package and verify signed executable
+        shell: pwsh
+        run: |
+          Copy-Item orbit-native-windows-test.zip orbit-chat-windows-x64.zip
+          $zip = [IO.Compression.ZipFile]::Open("$PWD/orbit-chat-windows-x64.zip", 'Update')
+          try {
+            $zip.GetEntry('OrbitChat.exe').Delete()
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$PWD/OrbitChat.exe", 'OrbitChat.exe')
+          } finally { $zip.Dispose() }
+          Expand-Archive orbit-chat-windows-x64.zip verified
+          $signature = Get-AuthenticodeSignature verified/OrbitChat.exe
+          if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate) {
+            throw "OrbitChat.exe must have a trusted, timestamped signature. Status: $($signature.Status)"
+          }
+          Write-Host "Verified publisher: $($signature.SignerCertificate.Subject)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-signed-windows-x64
+          path: orbit-chat-windows-x64.zip
+          if-no-files-found: error
