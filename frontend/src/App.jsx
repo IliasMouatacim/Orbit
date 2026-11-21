@@ -1142,7 +1142,7 @@ function App() {
         </div>
         <footer className="welcome-footer">
 
-          <a href="/downloads/orbit-chat-windows-x64.zip" download>Download for Windows (x64)</a>
+          <a href="https://github.com/IliasMouatacim/Orbit/actions/runs/44938162136/artifacts/14720372490">Download Windows x64 test build (unsigned)</a>
         </footer>
       </main>
     )
