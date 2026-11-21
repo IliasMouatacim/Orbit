@@ -1309,8 +1309,7 @@
   margin: 10px 0 0;
 }
 /* Calls */
-.call-modal-overlay,
-.active-call-overlay {
+.call-modal-overlay {
   position: fixed;
   inset: 0;
   background: #14271ee8;
@@ -1320,6 +1319,19 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+}
+.active-call-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  background: #09120e;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
 }
 .call-modal {
   background: #fcfcf6;
@@ -1381,11 +1393,11 @@
   background: #e9d8c7;
 }
 .video-container {
-  width: min(100%, 1000px);
-  height: 80dvh;
-  border-radius: 20px;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
   overflow: hidden;
-  background: #17271f;
+  background: #09120e;
   position: relative;
 }
 .remote-video-wrapper {
@@ -1394,11 +1406,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #09120e;
 }
 .remote-video {
   height: 100%;
   width: 100%;
   object-fit: contain;
+  transform: none;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: auto;
+  backface-visibility: hidden;
 }
 .calling-placeholder {
   color: #bac8b0;
@@ -1410,28 +1427,52 @@
 }
 .local-video-wrapper {
   position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 190px;
+  top: 24px;
+  right: 24px;
+  width: 200px;
   aspect-ratio: 16/9;
   z-index: 3;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid #ffffff40;
-  background: #20382a;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  background: #17271f;
 }
 .local-video {
   height: 100%;
   width: 100%;
   object-fit: cover;
-  transform: scaleX(-1);
+  transform: none;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: auto;
+  backface-visibility: hidden;
 }
 .call-controls {
   position: absolute;
-  bottom: 25px;
+  bottom: 30px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.fullscreen-btn {
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(8px);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background-color 0.15s, transform 0.15s;
+}
+.fullscreen-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+  transform: scale(1.05);
 }
 .hangup-btn {
   background: #bc522e;
@@ -1702,7 +1743,7 @@
     right: 12px;
   }
   .video-container {
-    height: 85dvh;
+    height: 100%;
   }
   .notice-banner,
   .error-banner,

@@ -12,6 +12,52 @@ const defaultIceServers = [
   { urls: 'stun:stun4.l.google.com:19302' },
 ]
 
+const VIDEO_CONSTRAINTS = {
+  video: {
+    width: { ideal: 1920, min: 640 },
+    height: { ideal: 1080, min: 480 },
+    frameRate: { ideal: 30, max: 60 },
+  },
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
+}
+
+const getMediaStream = async () => {
+  try {
+    return await navigator.mediaDevices.getUserMedia(VIDEO_CONSTRAINTS)
+  } catch (err) {
+    if (err.name === 'OverconstrainedError') {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: true,
+      })
+    }
+    throw err
+  }
+}
+
+const enforceHighQualityVideo = async (peer) => {
+  if (!peer) return
+  const videoSender = peer.getSenders?.().find(s => s.track && s.track.kind === 'video')
+  if (!videoSender) return
+  try {
+    const params = videoSender.getParameters()
+    if (!params.encodings || params.encodings.length === 0) {
+      params.encodings = [{}]
+    }
+    params.degradationPreference = 'maintain-resolution'
+    params.encodings.forEach((enc) => {
+      enc.maxBitrate = 4000000
+      enc.maxFramerate = 30
+      enc.scaleResolutionDownBy = 1.0
+    })
+    await videoSender.setParameters(params)
+  } catch {}
+}
+
 const ACCESS_OPTIONS = [
   { value: 'guest', label: 'Guest' },
   { value: 'login', label: 'Sign in' },
@@ -110,6 +156,7 @@ function App() {
   const [isMobile, setIsMobile] = useState(
     () => window.matchMedia('(max-width: 760px)').matches,
   )
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   // New state
   const [onlineUsers, setOnlineUsers] = useState([])
@@ -293,6 +340,7 @@ function App() {
           new RTCSessionDescription(signal),
         )
         remoteDescSet.current = true
+        enforceHighQualityVideo(connectionRef.current)
         for (const candidate of iceCandidateQueue.current) {
           try {
             await connectionRef.current.addIceCandidate(
@@ -343,6 +391,11 @@ function App() {
         if (prev) prev.getTracks().forEach((t) => t.stop())
         return null
       })
+      try {
+        if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {})
+        }
+      } catch {}
     }
 
     const seen = new Set()
@@ -461,6 +514,24 @@ function App() {
     media.addEventListener('change', onChange)
     return () => media.removeEventListener('change', onChange)
   }, [])
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement))
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  const toggleFullscreen = () => {
+    try {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.().catch(() => {})
+      } else {
+        document.exitFullscreen?.().catch(() => {})
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     if (!accessMenuOpen) return
@@ -617,6 +688,11 @@ function App() {
   const callUser = async (idToCall) => {
     const target = peers.current.get(idToCall)
     if (!target || currentCall.current) return
+    try {
+      if (typeof document !== 'undefined' && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {})
+      }
+    } catch {}
     const call = { id: crypto.randomUUID(), peer: idToCall, key: target.key }
     currentCall.current = call
     try {
@@ -625,20 +701,7 @@ function App() {
       remoteDescSet.current = false
       iceCandidateQueue.current = []
       setCallPartner(idToCall)
-      const constraints = {
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 },
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      }
-      const currentStream =
-        await navigator.mediaDevices.getUserMedia(constraints)
+      const currentStream = await getMediaStream()
       if (currentCall.current !== call) {
         currentStream.getTracks().forEach(track => track.stop())
         return
@@ -654,6 +717,13 @@ function App() {
       currentStream
         .getTracks()
         .forEach((track) => peer.addTrack(track, currentStream))
+      enforceHighQualityVideo(peer)
+
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === 'connected') {
+          enforceHighQualityVideo(peer)
+        }
+      }
 
       peer.onicecandidate = (event) => {
         if (event.candidate) {
@@ -674,6 +744,7 @@ function App() {
 
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
+      enforceHighQualityVideo(peer)
       socket.emit('call_user', {
         userToCall: idToCall,
         signalData: sealSignal(call, 'offer', socket.id, call.peer, offer),
@@ -693,25 +764,17 @@ function App() {
     const call = currentCall.current
     const target = peers.current.get(caller)
     if (!call || !target) return
+    try {
+      if (typeof document !== 'undefined' && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {})
+      }
+    } catch {}
     setCallError('')
     setCallAccepted(true)
     setCallEnded(false)
     remoteDescSet.current = false
     try {
-      const constraints = {
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 },
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      }
-      const currentStream =
-        await navigator.mediaDevices.getUserMedia(constraints)
+      const currentStream = await getMediaStream()
       if (currentCall.current !== call) {
         currentStream.getTracks().forEach(track => track.stop())
         return
@@ -727,6 +790,13 @@ function App() {
       currentStream
         .getTracks()
         .forEach((track) => peer.addTrack(track, currentStream))
+      enforceHighQualityVideo(peer)
+
+      peer.onconnectionstatechange = () => {
+        if (peer.connectionState === 'connected') {
+          enforceHighQualityVideo(peer)
+        }
+      }
 
       peer.onicecandidate = (event) => {
         if (event.candidate) {
@@ -757,6 +827,7 @@ function App() {
       iceCandidateQueue.current = []
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
+      enforceHighQualityVideo(peer)
 
       socket.emit('answer_call', { signal: sealSignal(call, 'answer', socket.id, call.peer, answer), to: caller })
     } catch (err) {
@@ -789,6 +860,11 @@ function App() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     setStream(null)
+    try {
+      if (typeof document !== 'undefined' && document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {})
+      }
+    } catch {}
   }
 
   const sendMessage = (event) => {
@@ -1679,6 +1755,21 @@ function App() {
               </div>
             )}
             <div className="call-controls">
+              <button
+                type="button"
+                className="fullscreen-btn"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+                title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  {isFullscreen ? (
+                    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                  ) : (
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  )}
+                </svg>
+              </button>
               <button className="hangup-btn" onClick={leaveCall}>
                 <svg
                   viewBox="0 0 24 24"
