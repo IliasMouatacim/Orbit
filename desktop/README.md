@@ -1,15 +1,20 @@
 # Orbit Chat for Windows
 
-Download the [portable Windows ZIP](../frontend/public/downloads/orbit-chat-windows-x64.zip), extract all files to one folder and launch `orbit-chat.exe`. The executable includes Orbit’s interface and opens its own window even when offline. Messaging, account access and calls require connectivity to the Orbit chat server. Windows 10 or 11 x64 needs Microsoft's Evergreen WebView2 Runtime.
+The native client uses Windows Forms for its interface, Windows audio and camera APIs for capture and playback, and a .NET WebRTC stack for voice and video. The checkout builds a self-contained x64 application for Windows 10 (1809+) and Windows 11. The previously published 1.0.1 download uses the earlier WebView2 client.
 
-## Build
+## Build and test
 
-Install Node.js 24, Rust stable for x86_64-pc-windows-msvc, and Visual Studio Build Tools with the Desktop development with C++ workload. From the repository root run:
+Install the .NET 10 SDK. From the repository root:
 
-    npm ci --prefix frontend
-    npm run build --prefix desktop
-    cargo build --locked --release --manifest-path desktop/src-tauri/Cargo.toml
+    dotnet restore desktop/native/Orbit.csproj -r win-x64 --locked-mode
+    dotnet publish desktop/native/Orbit.csproj -c Release -r win-x64 --self-contained true --no-restore -o windows-build
 
-The portable executable is `desktop/src-tauri/target/release/orbit-chat.exe`. The Build Orbit for Windows workflow tests that the application opens a window on Windows, packages the executable and generates its SHA-256 checksum. Pushing a version tag publishes the ZIP and checksum to GitHub Releases. Manual workflow runs produce build artifacts only.
+The Windows validation workflow includes the app-local Visual C++ runtime required by libsodium. For a manual build, install the Microsoft Visual C++ x64 redistributable or include its redistributable vcruntime140.dll. Keep the published files together. Start `windows-build/OrbitChat.exe`. Use the Windows microphone and camera privacy settings to enable access for desktop apps. For calls across restrictive networks, configure a TURN service via ORBIT_TURN_URL, ORBIT_TURN_USERNAME and ORBIT_TURN_CREDENTIAL in the running client's environment. The app uses the hosted Orbit relay and asks users to exchange verification codes over an independent trusted channel before direct messaging or calling.
 
-The build uses the frontend's default HTTPS API, or the HTTPS origin set in VITE_API_URL at build time. Include `https://tauri.localhost` alongside existing web origins in the deployed backend's comma-separated CLIENT_ORIGIN setting. The Render blueprint includes it.
+With the local backend running on port 4000, run:
+
+    dotnet run --project desktop/native-check
+
+The integration check creates two independent native client sessions. It checks encrypted global, room and direct messages, voice and video negotiation, bidirectional decoding of generated audio and video, and remote hangup. The Windows workflow also checks that the application opens a window. Use two Windows machines with microphones, speakers and cameras to verify capture, playback, visible remote video and hangup before replacing the public download.
+
+The signaling and text protocol is shared with the web client. Each native sign-in uses a new device key and stores account tokens only in memory. The native client returns to the join screen on disconnection.
