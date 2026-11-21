@@ -1121,7 +1121,7 @@ function App() {
         </div>
         <footer className="welcome-footer">
           <span>Less scrolling. More connecting.</span>
-          <span>Made for the moments between.</span>
+          <a href="/downloads/orbit-chat-windows-x64.zip" download>Download for Windows (x64)</a>
         </footer>
       </main>
     )
