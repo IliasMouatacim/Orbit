@@ -970,6 +970,7 @@ function App() {
   )
   const chatMessages = messages[activeChat] || []
   const query = messageSearch?.trim().toLowerCase()
+  const hasConversation = chatMessages.some(message => !message.system)
   const visibleMessages = query ? chatMessages.filter(message => !message.system &&
     (message.text.toLowerCase().includes(query) || message.user.toLowerCase().includes(query))) : chatMessages
   const closeMessageSearch = () => {
@@ -1237,10 +1238,8 @@ function App() {
               )}
             </button>
           ))}
+          <label className="room-entry-label" htmlFor="room-code">Create or join a room</label>
           <form className="join-room-form" onSubmit={joinPrivateRoom}>
-            <label className="sr-only" htmlFor="room-code">
-              Enter room code
-            </label>
             <input
               id="room-code"
               className="room-input"
@@ -1266,7 +1265,7 @@ function App() {
               {roomError}
             </p>
           )}
-          <p className="room-hint">Enter a name to create a room, or paste a private invitation.</p>
+          <p className="room-hint">Use a new room name or paste an invitation.</p>
           <div className="menu-section-header people-heading">
             PEOPLE ONLINE <span>{onlineUsers.length}</span>
           </div>
@@ -1276,6 +1275,8 @@ function App() {
               className={`user-item person-item ${activeChat === user.id ? 'active' : ''}`}
               disabled={user.id === socket.id}
               aria-current={activeChat === user.id ? 'page' : undefined}
+              aria-label={user.id === socket.id ? `${user.name} (you)` : `Message ${user.name}`}
+              aria-description={unread[user.id] ? `${unread[user.id]} unread` : undefined}
               onClick={() => selectChat(user.id)}
             >
               <span
@@ -1284,14 +1285,7 @@ function App() {
                 {user.name.slice(0, 1).toUpperCase()}
                 <i className="status-dot" />
               </span>
-              <span className="item-label">
-                {user.name}
-                <small>
-                  {user.id === socket.id
-                    ? 'That’s you'
-                    : 'Here for a conversation'}
-                </small>
-              </span>
+              <span className="item-label">{user.name}</span>
               {user.id === socket.id && <span className="you-tag">You</span>}
               {unread[user.id] > 0 && (
                 <span className="unread-badge">{unread[user.id]}</span>
@@ -1468,7 +1462,7 @@ function App() {
         )}
         <div className="messages-area">
           <div
-            className="messages-scroll"
+            className={`messages-scroll ${hasConversation && !query ? 'has-conversation' : ''}`}
             ref={listRef}
             onScroll={(event) => {
               const element = event.currentTarget
@@ -1483,7 +1477,7 @@ function App() {
             aria-live="polite"
             aria-relevant="additions text"
           >
-            {!query && !chatMessages.some(message => !message.system) && (
+            {!query && !hasConversation && (
               <div className="room-welcome">
                 <h2>{isGlobal ? 'Welcome to the Global Room' : isRoom ? `Welcome to #${chatTitle}` : `Chat with ${chatTitle}`}</h2>
                 <p>{isGlobal ? 'Start the conversation. Everyone in the workspace can join in.'
@@ -1615,7 +1609,7 @@ function App() {
               <Icon name="send" size={20} />
             </button>
           </form>
-          <div className="composer-hint">
+          <div className="composer-hint" data-empty={!draft.length}>
             <span>
               <kbd>Enter</kbd> to send <span className="hint-separator">·</span>{' '}
               <kbd>Shift + Enter</kbd> for a new line
