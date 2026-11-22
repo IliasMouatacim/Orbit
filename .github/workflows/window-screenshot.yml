@@ -1,0 +1,65 @@
+name: Capture Orbit window
+on:
+  push:
+    branches: [review-orbit-welcome]
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore desktop/native/Orbit.csproj -r win-x64 --locked-mode
+      - run: dotnet publish desktop/native/Orbit.csproj -c Release -r win-x64 --self-contained true --no-restore -o app
+      - name: Capture the welcome window
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public class Window {
+            [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+          }
+          '@
+          $app = Start-Process app/OrbitChat.exe -PassThru
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            do { Start-Sleep -Milliseconds 300; $app.Refresh() } until ($app.MainWindowTitle -eq 'Orbit Chat' -or (Get-Date) -gt $deadline)
+            Start-Sleep -Seconds 1
+            Add-Type -AssemblyName UIAutomationClient
+            Add-Type -AssemblyName UIAutomationTypes
+            $root = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+            foreach ($mode in @('Guest','Sign in','Register')) {
+            $cond = New-Object Windows.Automation.PropertyCondition ([Windows.Automation.AutomationElement]::NameProperty),$mode
+            $button = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$cond)
+            if (!$button) { throw "Missing mode: $mode" }
+            $button.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            Start-Sleep -Milliseconds 400
+            $r = New-Object Window+Rect
+            if (![Window]::GetWindowRect($app.MainWindowHandle,[ref]$r)) {throw 'Missing window'}
+            $bitmap = New-Object Drawing.Bitmap ($r.Right-$r.Left),($r.Bottom-$r.Top)
+            $graphics = [Drawing.Graphics]::FromImage($bitmap)
+            $dc = $graphics.GetHdc()
+            try { if (![Window]::PrintWindow($app.MainWindowHandle,$dc,2)) {throw 'Capture failed'} }
+            finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+            $colors = [Collections.Generic.HashSet[int]]::new()
+            for ($y=40;$y -lt $bitmap.Height;$y+=4) {for ($x=4;$x -lt $bitmap.Width;$x+=4) {[void]$colors.Add($bitmap.GetPixel($x,$y).ToArgb())}}
+            if ($colors.Count -lt 12) {throw 'Blank screenshot'}
+            $bitmap.Save("$PWD/Orbit-$($mode.Replace(' ','')).png",[Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Dispose()
+            }
+          } finally {if (!$app.HasExited) {$app.Kill()}}
+      - name: Save welcome screenshots for review
+        shell: pwsh
+        run: |
+          git config user.name "Orbit UI checks"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Orbit-Guest.png Orbit-Signin.png Orbit-Register.png
+          git commit -m "Capture guest, sign-in and registration windows"
+          git push origin HEAD:refs/heads/orbit-welcome-screenshots
