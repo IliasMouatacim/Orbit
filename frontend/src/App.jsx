@@ -1142,7 +1142,7 @@ function App() {
         </div>
         <footer className="welcome-footer">
 
-          <a href="https://github.com/IliasMouatacim/Orbit/actions/runs/44966767914/artifacts/14732011226">Download Windows x64 test build (unsigned)</a>
+          <a href="https://github.com/IliasMouatacim/Orbit/actions/runs/44968920747/artifacts/14733110661">Download Windows x64 test build (unsigned)</a>
         </footer>
       </main>
     )
