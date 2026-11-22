@@ -16,6 +16,10 @@ internal static class Program
 
 internal sealed class MainWindow : Form
 {
+    static readonly Color Forest = Color.FromArgb(35, 62, 53);
+    static readonly Color Paper = Color.FromArgb(247, 247, 242);
+    static readonly Color Ink = Color.FromArgb(38, 61, 54);
+    static readonly Color Clay = Color.FromArgb(164, 66, 35);
     static readonly Uri Server = new("https://chattingapp-n4ig.onrender.com");
     readonly HttpClient http = new() { BaseAddress = Server, Timeout = TimeSpan.FromSeconds(45) };
     readonly Label status = new() { Dock = DockStyle.Bottom, AutoSize = false, Height = 34, Padding = new(12, 7, 0, 0) };
@@ -41,7 +45,13 @@ internal sealed class MainWindow : Form
     {
         Text = "Orbit Chat"; StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new(760, 520); Size = new(1050, 720); Font = new("Segoe UI", 10);
-        BackColor = Color.FromArgb(244, 246, 241);
+        BackColor = Paper;
+        ForeColor = Ink;
+        status.BackColor = Forest;
+        status.ForeColor = Color.White;
+        channels.BackColor = Forest;
+        channels.ForeColor = Paper;
+        channels.ItemHeight = 28;
         Controls.Add(content); Controls.Add(status);
         channels.SelectedIndexChanged += (_, _) =>
         {
@@ -60,7 +70,8 @@ internal sealed class MainWindow : Form
 
     static Button ActionButton(string caption, Func<Task> action)
     {
-        var b = new Button { Text = caption, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(8, 4, 8, 4), FlatStyle = FlatStyle.System };
+        var b = new Button { Text = caption, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(8, 4, 8, 4), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(233, 237, 228), ForeColor = Ink };
+        b.FlatAppearance.BorderSize = 0;
         b.Click += async (_, _) =>
         {
             try { await action(); }
@@ -72,8 +83,8 @@ internal sealed class MainWindow : Form
     void ShowLogin()
     {
         content.Controls.Clear(); status.Text = "Orbit Chat for Windows";
-        var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new(44), FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
-        stack.Controls.Add(new Label { Text = "Orbit", Font = new("Segoe UI", 28, FontStyle.Bold), AutoSize = true });
+        var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new(24), FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        stack.Controls.Add(new Label { Text = "Open Orbit", Font = new("Segoe UI", 24, FontStyle.Bold), AutoSize = true });
         var mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 310 };
         mode.Items.AddRange(["Join as guest", "Sign in", "Create account"]); mode.SelectedIndex = 0;
         var name = new TextBox { Width = 310, MaxLength = 254 };
@@ -120,7 +131,28 @@ internal sealed class MainWindow : Form
             email.Visible = address.Visible = mode.SelectedIndex == 2;
             who.Text = mode.SelectedIndex switch { 1 => "Username or email", 2 => "Username", _ => "Display name" };
         }
-        stack.Controls.Add(join); content.Controls.Add(stack); AcceptButton = join; Mode(); name.Focus();
+        join.BackColor = Clay;
+        join.ForeColor = Color.White;
+        stack.Controls.Add(join);
+        var welcome = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), ColumnCount = 2 };
+        welcome.ColumnStyles.Add(new(SizeType.Percent, 100));
+        welcome.ColumnStyles.Add(new(SizeType.Absolute, 385));
+        var story = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Forest, Padding = new(24), RowCount = 4 };
+        story.RowStyles.Add(new(SizeType.AutoSize));
+        story.RowStyles.Add(new(SizeType.Percent, 48));
+        story.RowStyles.Add(new(SizeType.AutoSize));
+        story.RowStyles.Add(new(SizeType.Percent, 52));
+        story.Controls.Add(new Label { Text = "orbit.", AutoSize = true, ForeColor = Paper, Font = new("Segoe UI", 24, FontStyle.Bold) });
+        story.Controls.Add(new Label { Text = "Your chat", Anchor = AnchorStyles.Left | AnchorStyles.Bottom, AutoSize = true,
+            Font = new("Segoe UI", 32), ForeColor = Paper });
+        story.Controls.Add(new Label { Text = "workspace.", AutoSize = true, Font = new("Georgia", 32, FontStyle.Italic),
+            ForeColor = Color.FromArgb(240, 178, 143) });
+        story.Controls.Add(new Label { Text = "Private rooms, direct messages and verified calls.", AutoSize = true,
+            MaximumSize = new(280, 0), Margin = new(3, 18, 3, 0), ForeColor = Paper });
+        welcome.Controls.Add(story, 0, 0);
+        welcome.Controls.Add(stack, 1, 0);
+        content.Controls.Add(welcome);
+        AcceptButton = join; Mode(); name.Focus();
     }
 
     void ShowWorkspace()
@@ -128,7 +160,7 @@ internal sealed class MainWindow : Form
         AcceptButton = null; content.Controls.Clear(); logs.Clear(); drafts.Clear(); selected = "global"; draft.Clear(); search.Clear();
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new(8) };
         layout.ColumnStyles.Add(new(SizeType.Absolute, 235)); layout.ColumnStyles.Add(new(SizeType.Percent, 100));
-        var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new(8) };
+        var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new(16), BackColor = Forest, ForeColor = Paper };
         side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.Percent, 100));
         side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.AutoSize));
         side.Controls.Add(LabelFor("Signed in as " + chat!.Name)); side.Controls.Add(search); side.Controls.Add(channels);
@@ -166,6 +198,8 @@ internal sealed class MainWindow : Form
             }
             finally { sending = false; UpdateActions(); }
         });
+        send.BackColor = Clay;
+        send.ForeColor = Color.White;
         compose.Controls.Add(draft); compose.Controls.Add(send); conversation.Controls.Add(compose);
         layout.Controls.Add(conversation, 1, 0); content.Controls.Add(layout);
         status.Text = "Connected"; Populate(); SelectChannel("global");

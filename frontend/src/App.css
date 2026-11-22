@@ -109,6 +109,10 @@
   margin: auto;
 }
 .welcome-story {
+  padding: clamp(24px, 4vw, 56px);
+  border-radius: 20px;
+  background: var(--green);
+  color: var(--paper);
   position: relative;
 }
 .welcome-story .eyebrow {
@@ -126,7 +130,7 @@
   font-family: Georgia, serif;
   font-weight: 400;
   letter-spacing: -3.5px;
-  color: var(--accent);
+  color: #f0b28f;
 }
 .welcome-description {
   max-width: 400px;
@@ -1834,3 +1838,8 @@
 .message-search input { flex: 1; padding: 8px; background: transparent; color: var(--ink); border: 0; }
 .message-search span { font-size: 12px; }
 .conversation-intro[hidden] { display: none; }
+
+.welcome-story .welcome-description,
+.welcome-story .welcome-features { color: #e0e8df; }
+.welcome-story .orbit-note { color: var(--ink); }
+.welcome-story .orbit-ring { border-color: #849b8b; }
