@@ -1498,24 +1498,18 @@ function App() {
             {visibleMessages.map((msg, index) => {
               const isSystem = msg.system === true
               const isMine = ownSocketIds.has(msg.from) && !isSystem
-              const day = new Date(msg.timestamp).toLocaleDateString(
-                undefined,
-                { month: 'long', day: 'numeric' },
-              )
-              const previousDay =
-                index > 0
-                  ? new Date(
-                      visibleMessages[index - 1].timestamp,
-                    ).toLocaleDateString(undefined, {
-                      month: 'long',
-                      day: 'numeric',
-                    })
-                  : null
+              const sentAt = new Date(msg.timestamp)
+              const previous = visibleMessages[index - 1]
+              const previousTime = previous && new Date(previous.timestamp)
+              const startsDay = sentAt.toDateString() !== previousTime?.toDateString()
+              const continued = !query && !isSystem && previous && !previous.system &&
+                msg.from && previous.from === msg.from &&
+                Math.floor(sentAt.getTime() / 60000) === Math.floor(previousTime.getTime() / 60000)
               return (
                 <Fragment key={msg.id}>
-                  {day !== previousDay && (
+                  {startsDay && (
                     <div className="date-divider">
-                      <span>{day}</span>
+                      <span>{sentAt.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>
                     </div>
                   )}
                   {isSystem ? (
@@ -1524,7 +1518,7 @@ function App() {
                     </div>
                   ) : (
                     <article
-                      className={`message ${isMine ? 'mine' : 'theirs'}`}
+                      className={`message ${isMine ? 'mine' : 'theirs'} ${continued ? 'continued' : ''}`}
                     >
                       <span
                         className={`message-avatar avatar-${msg.user.charCodeAt(0) % 4}`}
@@ -1533,12 +1527,12 @@ function App() {
                         {msg.user.slice(0, 1).toUpperCase()}
                       </span>
                       <div className="message-content">
-                        <div className="message-meta">
+                        <div className={continued ? 'sr-only' : 'message-meta'}>
                           <span className="msg-author">
                             {isMine ? 'You' : msg.user}
                           </span>
                           <time dateTime={msg.timestamp} className="msg-time">
-                            {new Date(msg.timestamp).toLocaleTimeString([], {
+                            {sentAt.toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
@@ -1650,11 +1644,6 @@ function App() {
             <Icon name="close" size={17} />
           </button>
         </div>
-        <div className="detail-orbit">
-          <span className="detail-orbit-ring" />
-          <Icon name={chatIcon} size={38} />
-          <i />
-        </div>
         <h2>{chatTitle}</h2>
         <span className="detail-tag">
           <Icon
@@ -1669,7 +1658,6 @@ function App() {
         </span>
         <div className="details-rule" />
         <div className="details-note">
-          <Icon name="spark" size={19} />
           <h3>{isGlobal ? 'Public conversation' : 'End-to-end encrypted text'}</h3>
           <p>{isGlobal ? 'Anyone who joins can read public messages.' : isRoom ?
             'Share your room invitation privately. Anyone with it can read messages in this room.' :
@@ -1684,14 +1672,10 @@ function App() {
             <span>
               <Icon name="people" size={17} />
               {isGlobal
-                ? `${onlineUsers.length} people online`
+                ? `${onlineUsers.length} ${onlineUsers.length === 1 ? 'person' : 'people'} online`
                 : peer
                   ? 'Available for a chat'
                   : 'Currently offline'}
-            </span>
-            <span>
-              <Icon name="chat" size={17} />
-              Conversations live in the moment
             </span>
           </div>
         )}
