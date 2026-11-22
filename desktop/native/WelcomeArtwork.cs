@@ -10,7 +10,7 @@ internal sealed class WelcomeArtwork : Panel
     readonly Stopwatch elapsed = new();
     Bitmap? backdrop;
     Size cachedSize;
-    Form? host;
+
 
     public WelcomeArtwork()
     {
@@ -19,52 +19,32 @@ internal sealed class WelcomeArtwork : Panel
         scene = new Bitmap(original);
         DoubleBuffered = true;
         ResizeRedraw = true;
-        frames.Tick += (_, _) => Invalidate();
+        frames.Tick += (_, _) => {
+            bool allowed = WelcomeMotion.Enabled;
+            bool animate = allowed && Visible && FindForm()?.WindowState != FormWindowState.Minimized;
+            if (animate) {
+                frames.Interval = 32;
+                elapsed.Start();
+                Invalidate();
+            } else {
+                frames.Interval = 500;
+                elapsed.Stop();
+                if (!allowed && elapsed.ElapsedTicks != 0) { elapsed.Reset(); Invalidate(); }
+            }
+        };
         AccessibleName = "Orbit private chat and calls";
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        host = FindForm();
-        if (host != null) {
-            host.Activated += RefreshMotion;
-            host.Deactivate += PauseMotion;
-            host.Resize += RefreshMotion;
-            Microsoft.Win32.SystemEvents.UserPreferenceChanged += PreferenceChanged;
-        }
-        RefreshMotion(this, EventArgs.Empty);
+        frames.Start();
     }
-
-    void PreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
-    {
-        if (IsHandleCreated && !Disposing) BeginInvoke(() => RefreshMotion(this, EventArgs.Empty));
-    }
-
-    void RefreshMotion(object? sender, EventArgs e)
-    {
-        if (WelcomeMotion.Enabled && Visible && host != null && Form.ActiveForm == host && host.WindowState != FormWindowState.Minimized) {
-            elapsed.Start();
-            frames.Start();
-        } else {
-            PauseMotion(sender, e);
-            if (!WelcomeMotion.Enabled) elapsed.Reset();
-        }
-        Invalidate();
-    }
-
-    void PauseMotion(object? sender, EventArgs e) { frames.Stop(); elapsed.Stop(); }
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
-        PauseMotion(this, e);
-        if (host != null) {
-            host.Activated -= RefreshMotion;
-            host.Deactivate -= PauseMotion;
-            host.Resize -= RefreshMotion;
-            Microsoft.Win32.SystemEvents.UserPreferenceChanged -= PreferenceChanged;
-            host = null;
-        }
+        frames.Stop();
+        elapsed.Stop();
         base.OnHandleDestroyed(e);
     }
 
