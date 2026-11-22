@@ -88,7 +88,11 @@ internal sealed class MainWindow : Form
             FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         var heading = new Label { Text = "Welcome to Orbit", Font = new("Segoe UI", 24, FontStyle.Bold), AutoSize = true };
         var intro = new Label { Text = "Choose how to join your workspace.", AutoSize = true, ForeColor = Color.FromArgb(84,97,90), Margin = new(4,4,0,24) };
-        var choices = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new(3,0,0,14) };
+        var choices = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+        var tabStrip = new Panel { Size = new(282,40), Margin = new(3,0,0,14) };
+        var indicator = new Panel { BackColor = Clay, Bounds = new Rectangle(0,37,91,3) };
+        tabStrip.Controls.Add(choices);
+        tabStrip.Controls.Add(indicator);
         string[] captions = ["Guest","Sign in","Register"];
         var tabs = captions.Select(caption => new RadioButton { Text = caption, Appearance = Appearance.Button,
             TextAlign = ContentAlignment.MiddleCenter, FlatStyle = FlatStyle.Flat, AutoSize = false, Size = new(91,34), Margin = new(0,0,3,0) }).ToArray();
@@ -98,7 +102,7 @@ internal sealed class MainWindow : Form
         var password = new TextBox { Width = 280, UseSystemPasswordChar = true, MaxLength = 256, Font = name.Font };
         var email = new TextBox { Width = 280, MaxLength = 254, Font = name.Font };
         var who = LabelFor("Display name"); var pass = LabelFor("Password"); var address = LabelFor("Email (optional)");
-        stack.Controls.AddRange([heading,intro,choices,who,name,pass,password,address,email]);
+        stack.Controls.AddRange([heading,intro,tabStrip,who,name,pass,password,address,email]);
         Button? join = null;
         join = ActionButton("Continue", async () =>
         {
@@ -129,7 +133,7 @@ internal sealed class MainWindow : Form
                 password.Clear(); ShowWorkspace();
             }
             catch { next?.Dispose(); token = null; status.Text = "Unable to join."; throw; }
-            finally { stack.Enabled = true; }
+            finally { if (!stack.IsDisposed) stack.Enabled = true; }
         });
         void UpdateForm()
         {
@@ -145,10 +149,6 @@ internal sealed class MainWindow : Form
                 tab.ForeColor = tab.Checked ? Color.White : Ink;
             }
         }
-        for (int i=0; i<tabs.Length; i++) {
-            int option=i;
-            tabs[i].CheckedChanged += (_,_) => { if(tabs[option].Checked) { mode=option; UpdateForm(); } };
-        }
         name.TextChanged += (_,_) => UpdateForm();
         password.TextChanged += (_,_) => UpdateForm();
         join.AutoSize = false; join.Size = new(280,43); join.Margin = new(3,22,3,8);
@@ -161,21 +161,54 @@ internal sealed class MainWindow : Form
         welcome.Controls.Add(new WelcomeArtwork { Dock = DockStyle.Fill, Margin = Padding.Empty },0,0);
         var formArea = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Paper, Margin = Padding.Empty };
         formArea.Controls.Add(stack);
-        void CenterForm() {
-            stack.Location = new Point(Math.Max(12,(formArea.ClientSize.Width-stack.Width)/2),
-                Math.Max(12,(formArea.ClientSize.Height-stack.Height)/2));
+        var transition = new System.Windows.Forms.Timer { Interval = 15 };
+        var clock = new System.Diagnostics.Stopwatch();
+        bool switching = false;
+        int startY = 0, startX = 0;
+        Point Center() => new(Math.Max(12,(formArea.ClientSize.Width-stack.Width)/2),
+            Math.Max(12,(formArea.ClientSize.Height-stack.Height)/2));
+        void Settle() {
+            transition.Stop();
+            stack.Location = Center();
+            indicator.Left = tabs[mode].Left;
         }
-        formArea.Resize += (_,_) => CenterForm();
-        stack.SizeChanged += (_,_) => CenterForm();
+        transition.Tick += (_,_) => {
+            double progress = Math.Clamp(clock.Elapsed.TotalMilliseconds / 200, 0, 1);
+            if (progress >= 1 || !WelcomeMotion.Enabled) { Settle(); return; }
+            double blend = 1 - Math.Pow(1-progress, 3);
+            var target = Center();
+            stack.Location = new(target.X, (int)Math.Round(startY + (target.Y-startY)*blend));
+            indicator.Left = (int)Math.Round(startX + (tabs[mode].Left-startX)*blend);
+        };
+        formArea.Resize += (_,_) => Settle();
+        stack.SizeChanged += (_,_) => { if (!switching) Settle(); };
+        welcome.Disposed += (_,_) => transition.Dispose();
+        for (int i=0; i<tabs.Length; i++) {
+            int option=i;
+            tabs[i].CheckedChanged += (_,_) => {
+                if (!tabs[option].Checked) return;
+                bool animate = mode != option && Visible && WelcomeMotion.Enabled;
+                startY = stack.Top;
+                startX = indicator.Left;
+                switching = true;
+                stack.SuspendLayout();
+                mode = option;
+                UpdateForm();
+                stack.ResumeLayout(true);
+                switching = false;
+                if (animate) { clock.Restart(); transition.Start(); } else Settle();
+            };
+        }
         welcome.Controls.Add(formArea,1,0);
         content.Controls.Add(welcome);
-        tabs[0].Checked=true; CenterForm();
+        tabs[0].Checked=true; Settle();
         AcceptButton = join; name.Focus();
     }
 
     void ShowWorkspace()
     {
-        status.Visible = true; AcceptButton = null; content.Controls.Clear(); logs.Clear(); drafts.Clear(); selected = "global"; draft.Clear(); search.Clear();
+        status.Visible = true; AcceptButton = null;
+        if (content.Controls.Count > 0) content.Controls[0].Dispose(); logs.Clear(); drafts.Clear(); selected = "global"; draft.Clear(); search.Clear();
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new(8) };
         layout.ColumnStyles.Add(new(SizeType.Absolute, 235)); layout.ColumnStyles.Add(new(SizeType.Percent, 100));
         var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new(16), BackColor = Forest, ForeColor = Paper };
