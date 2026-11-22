@@ -1176,13 +1176,6 @@ function App() {
             <Icon name="close" />
           </button>
         </div>
-        <div className="workspace-label">
-          <span className="workspace-symbol">O</span>
-          <div>
-            Your workspace<small>Make yourself at home</small>
-          </div>
-          <Icon name="spark" size={16} />
-        </div>
         <label className="search-field">
           <Icon name="search" size={17} />
           <input
@@ -1218,7 +1211,7 @@ function App() {
                 <Icon name="globe" />
               </span>
               <span className="item-label">
-                Global Room<small>A little bit of everyone</small>
+                Global Room<small>Public conversation</small>
               </span>
               {unread.global > 0 && (
                 <span className="unread-badge">{unread.global}</span>
@@ -1387,9 +1380,9 @@ function App() {
               {!connected
                 ? 'Reconnecting…'
                 : isGlobal
-                  ? `${onlineUsers.length} online · Everyone’s welcome`
+                  ? `${onlineUsers.length} online · Public conversation`
                   : isRoom
-                    ? 'A space for your people'
+                    ? 'Private room'
                     : peer
                       ? 'Online · Direct conversation'
                       : 'This person is offline'}
@@ -1490,37 +1483,18 @@ function App() {
             aria-live="polite"
             aria-relevant="additions text"
           >
-            <div className="conversation-intro" hidden={Boolean(query)}>
-              <span className="intro-icon">
-                <Icon name={chatIcon} size={30} />
-              </span>
-              <span className="eyebrow">
-                {isGlobal
-                  ? 'THE COMMON GROUND'
-                  : isRoom
-                    ? 'A LITTLE SPACE OF YOUR OWN'
-                    : 'JUST THE TWO OF YOU'}
-              </span>
-              <h2>
-                {isGlobal
-                  ? 'Good company starts with hello.'
-                  : isRoom
-                    ? `Welcome to #${chatTitle}.`
-                    : `Say hello to ${chatTitle}.`}
-              </h2>
-              <p>
-                {isGlobal
-                  ? 'Share a thought, ask a question, or see where the conversation takes you.'
-                  : isRoom
-                    ? 'You found your corner of Orbit. Share the room code to bring your people together.'
-                    : 'A quick check-in or a long catch-up. This conversation is yours.'}
-              </p>
-              {!chatMessages.some((message) => !message.system) && (
-                <span className="first-message-prompt">
-                  <Icon name="spark" size={14} /> Be the first to break the ice
-                </span>
-              )}
-            </div>
+            {!query && !chatMessages.some(message => !message.system) && (
+              <div className="room-welcome">
+                <h2>{isGlobal ? 'Welcome to the Global Room' : isRoom ? `Welcome to #${chatTitle}` : `Chat with ${chatTitle}`}</h2>
+                <p>{isGlobal ? 'Start the conversation. Everyone in the workspace can join in.'
+                  : isRoom ? 'Share the room invitation privately to bring people into this conversation.'
+                  : peer?.verified ? 'Your devices are verified. Send your first message below.'
+                  : peer ? 'Verify your contact’s device below to start messaging.' : 'Your contact is offline.'}</p>
+              </div>
+            )}
+            {query && !visibleMessages.length && (
+              <p className="message-search-empty">No messages match “{messageSearch}”.</p>
+            )}
             {visibleMessages.map((msg, index) => {
               const isSystem = msg.system === true
               const isMine = ownSocketIds.has(msg.from) && !isSystem
@@ -1655,7 +1629,7 @@ function App() {
             <span>
               {draft.length > 0
                 ? `${draft.length} / 500`
-                : 'A little kindness goes a long way.'}
+                : ''}
             </span>
           </div>
         </div>
@@ -1667,7 +1641,7 @@ function App() {
         inert={isMobile && sidebarOpen}
       >
         <div className="details-heading">
-          THE LITTLE DETAILS
+          Conversation details
           <button
             className="icon-button"
             aria-label="Close details"
@@ -1682,13 +1656,6 @@ function App() {
           <i />
         </div>
         <h2>{chatTitle}</h2>
-        <p className="details-description">
-          {isGlobal
-            ? 'An open door to good conversation.'
-            : isRoom
-              ? 'A shared code. A shared space.'
-              : 'A little closer, even from a distance.'}
-        </p>
         <span className="detail-tag">
           <Icon
             name={isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'}
@@ -1728,13 +1695,6 @@ function App() {
             </span>
           </div>
         )}
-        <div className="details-footnote">
-          <Icon name="orbit" size={20} />
-          <p>
-            A small space.
-            <br />A world of possibility.
-          </p>
-        </div>
       </aside>
 
       {/* Incoming Call Modal */}
