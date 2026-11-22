@@ -29,6 +29,7 @@ internal sealed class MainWindow : Form
     readonly TextBox search = new() { Dock = DockStyle.Top, PlaceholderText = "Find people or rooms" };
     readonly RichTextBox history = new() { Dock = DockStyle.Fill, ReadOnly = true, DetectUrls = false, BorderStyle = BorderStyle.None, BackColor = Color.White };
     readonly TextBox draft = new() { Dock = DockStyle.Fill, MaxLength = 500, PlaceholderText = "Write a message" };
+    readonly RoundedField searchField, draftField;
     readonly Label title = new() { AutoSize = true, Font = new("Segoe UI", 16, FontStyle.Bold) };
     readonly Dictionary<string, List<string>> logs = [];
     readonly Dictionary<string, string> drafts = [];
@@ -52,6 +53,10 @@ internal sealed class MainWindow : Form
         channels.BackColor = Forest;
         channels.ForeColor = Paper;
         channels.ItemHeight = 28;
+        search.AccessibleName = "Find people or rooms";
+        draft.AccessibleName = "Message";
+        searchField = new RoundedField(search, 180) { Dock = DockStyle.Top };
+        draftField = new RoundedField(draft, 280) { Dock = DockStyle.Top };
         Controls.Add(content); Controls.Add(status);
         channels.SelectedIndexChanged += (_, _) =>
         {
@@ -120,7 +125,12 @@ internal sealed class MainWindow : Form
         var password = new TextBox { Width = 280, UseSystemPasswordChar = true, MaxLength = 256, Font = name.Font };
         var email = new TextBox { Width = 280, MaxLength = 254, Font = name.Font };
         var who = LabelFor("Display name"); var pass = LabelFor("Password"); var address = LabelFor("Email (optional)");
-        stack.Controls.AddRange([heading,intro,tabStrip,who,name,pass,password,address,email]);
+        var nameField = new RoundedField(name, 280);
+        password.AccessibleName = pass.Text;
+        email.AccessibleName = address.Text;
+        var passwordField = new RoundedField(password, 280);
+        var emailField = new RoundedField(email, 280);
+        stack.Controls.AddRange([heading,intro,tabStrip,who,nameField,pass,passwordField,address,emailField]);
         Button? join = null;
         join = ActionButton("Continue", async () =>
         {
@@ -155,9 +165,10 @@ internal sealed class MainWindow : Form
         });
         void UpdateForm()
         {
-            password.Visible = pass.Visible = mode != 0;
-            email.Visible = address.Visible = mode == 2;
+            passwordField.Visible = pass.Visible = mode != 0;
+            emailField.Visible = address.Visible = mode == 2;
             who.Text = mode switch { 1 => "Username or email", 2 => "Username", _ => "Display name" };
+            name.AccessibleName = who.Text;
             name.PlaceholderText = mode == 0 ? "Your display name" : who.Text;
             join.Text = mode switch { 1 => "Sign in", 2 => "Create account", _ => "Join as guest" };
             join.Enabled = !string.IsNullOrWhiteSpace(name.Text) && (mode == 0 || password.Text.Length > 0);
@@ -232,7 +243,7 @@ internal sealed class MainWindow : Form
         var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new(16), BackColor = Forest, ForeColor = Paper };
         side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.Percent, 100));
         side.RowStyles.Add(new(SizeType.AutoSize)); side.RowStyles.Add(new(SizeType.AutoSize));
-        side.Controls.Add(LabelFor("Signed in as " + chat!.Name)); side.Controls.Add(search); side.Controls.Add(channels);
+        side.Controls.Add(LabelFor("Signed in as " + chat!.Name)); side.Controls.Add(searchField); side.Controls.Add(channels);
         side.Controls.Add(ActionButton("Create or join room", async () =>
         {
             var text = Prompt("Private room", "Enter a room name or a complete invitation.");
@@ -269,7 +280,8 @@ internal sealed class MainWindow : Form
         });
         send.BackColor = Clay;
         send.ForeColor = Color.White;
-        compose.Controls.Add(draft); compose.Controls.Add(send); conversation.Controls.Add(compose);
+        send.Anchor = AnchorStyles.Right;
+        compose.Controls.Add(draftField); compose.Controls.Add(send); conversation.Controls.Add(compose);
         layout.Controls.Add(conversation, 1, 0); content.Controls.Add(layout);
         status.Text = "Connected"; Populate(); SelectChannel("global");
     }
@@ -335,7 +347,7 @@ internal sealed class MainWindow : Form
         using var dialog = new Form
         {
             Text = caption,
-            ClientSize = new(480, code == null ? 155 : 215),
+            ClientSize = new(480, code == null ? 190 : 260),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MinimizeBox = false,
@@ -343,10 +355,10 @@ internal sealed class MainWindow : Form
         };
         var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new(16), FlowDirection = FlowDirection.TopDown };
         panel.Controls.Add(new Label { Text = instruction, AutoSize = true, MaximumSize = new(435, 0) });
-        if (code != null) panel.Controls.Add(new TextBox { Text = code, ReadOnly = true, Width = 435, AccessibleName = "Your verification code" });
+        if (code != null) panel.Controls.Add(new RoundedField(new TextBox { Text = code, ReadOnly = true, AccessibleName = "Your verification code" }, 435));
         var input = new TextBox { Width = 435, AccessibleName = caption };
         var ok = new Button { Text = "Continue", DialogResult = DialogResult.OK, AutoSize = true };
-        panel.Controls.Add(input); panel.Controls.Add(ok); dialog.Controls.Add(panel); dialog.AcceptButton = ok;
+        panel.Controls.Add(new RoundedField(input, 435)); panel.Controls.Add(ok); dialog.Controls.Add(panel); dialog.AcceptButton = ok;
         dialog.Shown += (_, _) => input.Focus();
         return dialog.ShowDialog(this) == DialogResult.OK ? input.Text.Trim() : null;
     }
