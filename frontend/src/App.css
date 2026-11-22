@@ -857,24 +857,18 @@
 .room-welcome {
   flex: 0 0 auto;
   padding: clamp(24px, 4vw, 52px);
-  padding-right: 40%;
   border-radius: 24px;
   color: #fffaf0;
   background-color: #173437;
-  background-image: linear-gradient(90deg, #173437 35%, transparent 80%), url('./assets/orbit-room.webp');
-  background-repeat: no-repeat;
-  background-position: center, right center;
-  background-size: cover, 50% auto;
 }
 .room-welcome h2 {
-  max-width: 16ch;
   margin: 0 0 12px;
   font: 500 clamp(27px, 3.1vw, 48px)/1.05 Georgia, serif;
   letter-spacing: -.035em;
   overflow-wrap: anywhere;
 }
 .room-welcome p {
-  max-width: 36ch;
+  max-width: 56ch;
   margin: 0;
   color: #e2ece3;
   font-size: 14px;
@@ -1741,11 +1735,8 @@
 
 @media (max-width: 520px) {
   .room-welcome {
-    padding: 22px 32% 22px 20px;
+    padding: 22px 20px;
     border-radius: 18px;
-    background-position: center, right -40px center;
-    background-size: cover, auto 115%;
-    background-image: linear-gradient(90deg, #173437 44%, #173437aa 67%, transparent), url('./assets/orbit-room.webp');
   }
 }
 @media (prefers-reduced-motion: no-preference) {
