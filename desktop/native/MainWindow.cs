@@ -92,7 +92,7 @@ internal sealed class MainWindow : Form
         string[] captions = ["Guest","Sign in","Register"];
         var tabs = captions.Select(caption => new RadioButton { Text = caption, Appearance = Appearance.Button,
             TextAlign = ContentAlignment.MiddleCenter, FlatStyle = FlatStyle.Flat, AutoSize = false, Size = new(91,34), Margin = new(0,0,3,0) }).ToArray();
-        foreach (var tab in tabs) { tab.FlatAppearance.BorderSize = 0; choices.Controls.Add(tab); }
+        foreach (var tab in tabs) { tab.FlatAppearance.BorderSize = 0; tab.FlatAppearance.CheckedBackColor = Forest; choices.Controls.Add(tab); }
         int mode = 0;
         var name = new TextBox { Width = 280, MaxLength = 254, Font = new("Segoe UI",12), PlaceholderText = "Your display name" };
         var password = new TextBox { Width = 280, UseSystemPasswordChar = true, MaxLength = 256, Font = name.Font };
@@ -139,6 +139,7 @@ internal sealed class MainWindow : Form
             name.PlaceholderText = mode == 0 ? "Your display name" : who.Text;
             join.Text = mode switch { 1 => "Sign in", 2 => "Create account", _ => "Join as guest" };
             join.Enabled = !string.IsNullOrWhiteSpace(name.Text) && (mode == 0 || password.Text.Length > 0);
+            join.BackColor = join.Enabled ? Clay : Color.FromArgb(226, 229, 222);
             foreach (var tab in tabs) {
                 tab.BackColor = tab.Checked ? Forest : Color.FromArgb(227,233,225);
                 tab.ForeColor = tab.Checked ? Color.White : Ink;
