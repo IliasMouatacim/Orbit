@@ -62,4 +62,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Orbit-Guest.png Orbit-Signin.png Orbit-Register.png
           git commit -m "Capture guest, sign-in and registration windows"
-          git push origin HEAD:refs/heads/orbit-pill-screenshots
+          git push origin HEAD:refs/heads/orbit-field-screenshots
