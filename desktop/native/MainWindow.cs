@@ -83,29 +83,36 @@ internal sealed class MainWindow : Form
     void ShowLogin()
     {
         content.Controls.Clear(); status.Text = "Orbit Chat for Windows";
-        var stack = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new(24), FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
-        stack.Controls.Add(new Label { Text = "Open Orbit", Font = new("Segoe UI", 24, FontStyle.Bold), AutoSize = true });
-        var mode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 310 };
-        mode.Items.AddRange(["Join as guest", "Sign in", "Create account"]); mode.SelectedIndex = 0;
-        var name = new TextBox { Width = 310, MaxLength = 254 };
-        var password = new TextBox { Width = 310, UseSystemPasswordChar = true, MaxLength = 256 };
-        var email = new TextBox { Width = 310, MaxLength = 254 };
+        status.Visible = false;
+        var stack = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
+        var heading = new Label { Text = "Welcome to Orbit", Font = new("Segoe UI", 24, FontStyle.Bold), AutoSize = true };
+        var intro = new Label { Text = "Choose how to join your workspace.", AutoSize = true, ForeColor = Color.FromArgb(84,97,90), Margin = new(4,4,0,24) };
+        var choices = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new(3,0,0,14) };
+        string[] captions = ["Guest","Sign in","Register"];
+        var tabs = captions.Select(caption => new RadioButton { Text = caption, Appearance = Appearance.Button,
+            TextAlign = ContentAlignment.MiddleCenter, FlatStyle = FlatStyle.Flat, AutoSize = false, Size = new(91,34), Margin = new(0,0,3,0) }).ToArray();
+        foreach (var tab in tabs) { tab.FlatAppearance.BorderSize = 0; choices.Controls.Add(tab); }
+        int mode = 0;
+        var name = new TextBox { Width = 280, MaxLength = 254, Font = new("Segoe UI",12), PlaceholderText = "Your display name" };
+        var password = new TextBox { Width = 280, UseSystemPasswordChar = true, MaxLength = 256, Font = name.Font };
+        var email = new TextBox { Width = 280, MaxLength = 254, Font = name.Font };
         var who = LabelFor("Display name"); var pass = LabelFor("Password"); var address = LabelFor("Email (optional)");
-        stack.Controls.AddRange([LabelFor("Access"), mode, who, name, pass, password, address, email]);
+        stack.Controls.AddRange([heading,intro,choices,who,name,pass,password,address,email]);
         Button? join = null;
         join = ActionButton("Continue", async () =>
         {
             if (!stack.Enabled || string.IsNullOrWhiteSpace(name.Text)) return;
-            stack.Enabled = false; status.Text = "Connecting…";
+            stack.Enabled = false; status.Visible = true; status.Text = "Connecting…";
             Chat? next = null;
             try
             {
                 next = new Chat();
                 string handle = name.Text.Trim();
-                if (mode.SelectedIndex == 0 && (handle.Length > 24 || handle.StartsWith('@'))) throw new ArgumentException("Choose a guest name of up to 24 characters without a leading @.");
-                if (mode.SelectedIndex != 0)
+                if (mode == 0 && (handle.Length > 24 || handle.StartsWith('@'))) throw new ArgumentException("Choose a guest name of up to 24 characters without a leading @.");
+                if (mode != 0)
                 {
-                    using var response = await http.PostAsJsonAsync(mode.SelectedIndex == 1 ? "/accounts/login" : "/accounts/register",
+                    using var response = await http.PostAsJsonAsync(mode == 1 ? "/accounts/login" : "/accounts/register",
                         new { username = handle, password = password.Text, email = email.Text.Trim() });
                     var result = await response.Content.ReadFromJsonAsync<JsonElement>();
                     if (!response.IsSuccessStatusCode) throw new InvalidOperationException(Chat.Str(result, "error"));
@@ -124,40 +131,50 @@ internal sealed class MainWindow : Form
             catch { next?.Dispose(); token = null; status.Text = "Unable to join."; throw; }
             finally { stack.Enabled = true; }
         });
-        mode.SelectedIndexChanged += (_, _) => Mode();
-        void Mode()
+        void UpdateForm()
         {
-            password.Visible = pass.Visible = mode.SelectedIndex != 0;
-            email.Visible = address.Visible = mode.SelectedIndex == 2;
-            who.Text = mode.SelectedIndex switch { 1 => "Username or email", 2 => "Username", _ => "Display name" };
+            password.Visible = pass.Visible = mode != 0;
+            email.Visible = address.Visible = mode == 2;
+            who.Text = mode switch { 1 => "Username or email", 2 => "Username", _ => "Display name" };
+            name.PlaceholderText = mode == 0 ? "Your display name" : who.Text;
+            join.Text = mode switch { 1 => "Sign in", 2 => "Create account", _ => "Join as guest" };
+            join.Enabled = !string.IsNullOrWhiteSpace(name.Text) && (mode == 0 || password.Text.Length > 0);
+            foreach (var tab in tabs) {
+                tab.BackColor = tab.Checked ? Forest : Color.FromArgb(227,233,225);
+                tab.ForeColor = tab.Checked ? Color.White : Ink;
+            }
         }
-        join.BackColor = Clay;
-        join.ForeColor = Color.White;
+        for (int i=0; i<tabs.Length; i++) {
+            int option=i;
+            tabs[i].CheckedChanged += (_,_) => { if(tabs[option].Checked) { mode=option; UpdateForm(); } };
+        }
+        name.TextChanged += (_,_) => UpdateForm();
+        password.TextChanged += (_,_) => UpdateForm();
+        join.AutoSize = false; join.Size = new(280,43); join.Margin = new(3,22,3,8);
+        join.BackColor = Clay; join.ForeColor = Color.White;
         stack.Controls.Add(join);
-        var welcome = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new(20), ColumnCount = 2 };
-        welcome.ColumnStyles.Add(new(SizeType.Percent, 100));
-        welcome.ColumnStyles.Add(new(SizeType.Absolute, 385));
-        var story = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Forest, Padding = new(24), RowCount = 4 };
-        story.RowStyles.Add(new(SizeType.AutoSize));
-        story.RowStyles.Add(new(SizeType.Percent, 48));
-        story.RowStyles.Add(new(SizeType.AutoSize));
-        story.RowStyles.Add(new(SizeType.Percent, 52));
-        story.Controls.Add(new Label { Text = "orbit.", AutoSize = true, ForeColor = Paper, Font = new("Segoe UI", 24, FontStyle.Bold) });
-        story.Controls.Add(new Label { Text = "Your chat", Anchor = AnchorStyles.Left | AnchorStyles.Bottom, AutoSize = true,
-            Font = new("Segoe UI", 32), ForeColor = Paper });
-        story.Controls.Add(new Label { Text = "workspace.", AutoSize = true, Font = new("Georgia", 32, FontStyle.Italic),
-            ForeColor = Color.FromArgb(240, 178, 143) });
-        story.Controls.Add(new Label { Text = "Private rooms, direct messages and verified calls.", AutoSize = true,
-            MaximumSize = new(280, 0), Margin = new(3, 18, 3, 0), ForeColor = Paper });
-        welcome.Controls.Add(story, 0, 0);
-        welcome.Controls.Add(stack, 1, 0);
+        var welcome = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        welcome.ColumnStyles.Add(new(SizeType.Percent, 52));
+        welcome.ColumnStyles.Add(new(SizeType.Percent, 48));
+        welcome.RowStyles.Add(new(SizeType.Percent,100));
+        welcome.Controls.Add(new WelcomeArtwork { Dock = DockStyle.Fill, Margin = Padding.Empty },0,0);
+        var formArea = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Paper, Margin = Padding.Empty };
+        formArea.Controls.Add(stack);
+        void CenterForm() {
+            stack.Location = new Point(Math.Max(12,(formArea.ClientSize.Width-stack.Width)/2),
+                Math.Max(12,(formArea.ClientSize.Height-stack.Height)/2));
+        }
+        formArea.Resize += (_,_) => CenterForm();
+        stack.SizeChanged += (_,_) => CenterForm();
+        welcome.Controls.Add(formArea,1,0);
         content.Controls.Add(welcome);
-        AcceptButton = join; Mode(); name.Focus();
+        tabs[0].Checked=true; CenterForm();
+        AcceptButton = join; name.Focus();
     }
 
     void ShowWorkspace()
     {
-        AcceptButton = null; content.Controls.Clear(); logs.Clear(); drafts.Clear(); selected = "global"; draft.Clear(); search.Clear();
+        status.Visible = true; AcceptButton = null; content.Controls.Clear(); logs.Clear(); drafts.Clear(); selected = "global"; draft.Clear(); search.Clear();
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new(8) };
         layout.ColumnStyles.Add(new(SizeType.Absolute, 235)); layout.ColumnStyles.Add(new(SizeType.Percent, 100));
         var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new(16), BackColor = Forest, ForeColor = Paper };
