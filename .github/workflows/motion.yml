@@ -16,5 +16,5 @@ jobs:
       - shell: pwsh
         run: |
           $p = Start-Process probe/OrbitChat.exe -PassThru
-          if (!$p.WaitForExit(45000)) { $p.Kill(); throw 'Probe timed out' }
-          if ($p.ExitCode -ne 0) { throw (Get-Content motion-error.txt -Raw) }
+          if (!$p.WaitForExit(45000)) { $p.Kill(); Write-Output '::error::Probe timed out'; throw 'Probe timed out' }
+          if ($p.ExitCode -ne 0) { $detail = Get-Content motion-error.txt -First 1; Write-Output "::error::$detail"; throw $detail }
