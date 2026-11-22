@@ -68,10 +68,27 @@ internal sealed class MainWindow : Form
         Shown += (_, _) => ShowLogin();
     }
 
+    static void ShapeAsPill(Control control)
+    {
+        void UpdateShape()
+        {
+            int diameter = Math.Min(control.Width, control.Height);
+            if (diameter < 1) return;
+            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddArc(0, 0, diameter, control.Height, 90, 180);
+            path.AddArc(control.Width - diameter, 0, diameter, control.Height, 270, 180);
+            path.CloseFigure();
+            control.Region = new Region(path);
+        }
+        control.SizeChanged += (_, _) => UpdateShape();
+        UpdateShape();
+    }
+
     static Button ActionButton(string caption, Func<Task> action)
     {
-        var b = new Button { Text = caption, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(8, 4, 8, 4), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(233, 237, 228), ForeColor = Ink };
+        var b = new Button { Text = caption, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new(15, 4, 15, 4), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(233, 237, 228), ForeColor = Ink };
         b.FlatAppearance.BorderSize = 0;
+        ShapeAsPill(b);
         b.Click += async (_, _) =>
         {
             try { await action(); }
@@ -92,11 +109,12 @@ internal sealed class MainWindow : Form
         var tabStrip = new Panel { Size = new(282,40), Margin = new(3,0,0,14) };
         var indicator = new Panel { BackColor = Clay, Bounds = new Rectangle(0,37,91,3) };
         tabStrip.Controls.Add(choices);
+        ShapeAsPill(indicator);
         tabStrip.Controls.Add(indicator);
         string[] captions = ["Guest","Sign in","Register"];
         var tabs = captions.Select(caption => new RadioButton { Text = caption, Appearance = Appearance.Button,
             TextAlign = ContentAlignment.MiddleCenter, FlatStyle = FlatStyle.Flat, AutoSize = false, Size = new(91,34), Margin = new(0,0,3,0) }).ToArray();
-        foreach (var tab in tabs) { tab.FlatAppearance.BorderSize = 0; tab.FlatAppearance.CheckedBackColor = Forest; choices.Controls.Add(tab); }
+        foreach (var tab in tabs) { ShapeAsPill(tab); tab.FlatAppearance.BorderSize = 0; tab.FlatAppearance.CheckedBackColor = Forest; choices.Controls.Add(tab); }
         int mode = 0;
         var name = new TextBox { Width = 280, MaxLength = 254, Font = new("Segoe UI",12), PlaceholderText = "Your display name" };
         var password = new TextBox { Width = 280, UseSystemPasswordChar = true, MaxLength = 256, Font = name.Font };
