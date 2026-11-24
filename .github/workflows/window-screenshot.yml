@@ -12,6 +12,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --prefix backend
+      - shell: pwsh
+        run: |
+          $file = 'desktop/native/MainWindow.cs'
+          (Get-Content -Raw $file).Replace('https://chattingapp-n4ig.onrender.com','http://127.0.0.1:4000') | Set-Content $file
       - run: dotnet restore desktop/native/Orbit.csproj -r win-x64 --locked-mode
       - run: dotnet publish desktop/native/Orbit.csproj -c Release -r win-x64 --self-contained true --no-restore -o app
       - name: Capture the welcome window
@@ -27,6 +35,8 @@ jobs:
             [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
           }
           '@
+          $relay = Start-Process node -ArgumentList 'backend/index.js' -PassThru
+          Start-Sleep -Seconds 2
           $app = Start-Process app/OrbitChat.exe -PassThru
           try {
             $deadline = (Get-Date).AddSeconds(45)
@@ -35,12 +45,24 @@ jobs:
             Add-Type -AssemblyName UIAutomationClient
             Add-Type -AssemblyName UIAutomationTypes
             $root = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
-            foreach ($mode in @('Guest','Sign in','Register')) {
+            function FindControl($label) {
+              $test = New-Object Windows.Automation.PropertyCondition ([Windows.Automation.AutomationElement]::NameProperty),$label
+              $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$test)
+            }
+            foreach ($mode in @('Guest','Workspace')) {
+            if ($mode -eq 'Workspace') {
+              (FindControl 'Display name').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('Maya')
+              (FindControl 'Join as guest').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+              for ($i=0; $i -lt 40 -and !(FindControl 'Send'); $i++) { Start-Sleep -Milliseconds 250 }
+              (FindControl 'Message').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('Hello from the Windows app!')
+              (FindControl 'Send').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+            } else {
             $cond = New-Object Windows.Automation.PropertyCondition ([Windows.Automation.AutomationElement]::NameProperty),$mode
             $button = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$cond)
             if (!$button) { throw "Missing mode: $mode" }
             $button.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern).Select()
-            Start-Sleep -Milliseconds 400
+            }
+            Start-Sleep -Milliseconds 800
             $r = New-Object Window+Rect
             if (![Window]::GetWindowRect($app.MainWindowHandle,[ref]$r)) {throw 'Missing window'}
             $bitmap = New-Object Drawing.Bitmap ($r.Right-$r.Left),($r.Bottom-$r.Top)
@@ -54,12 +76,12 @@ jobs:
             $bitmap.Save("$PWD/Orbit-$($mode.Replace(' ','')).png",[Drawing.Imaging.ImageFormat]::Png)
             $bitmap.Dispose()
             }
-          } finally {if (!$app.HasExited) {$app.Kill()}}
+          } finally {if (!$app.HasExited) {$app.Kill()}; if (!$relay.HasExited) {$relay.Kill()}}
       - name: Save welcome screenshots for review
         shell: pwsh
         run: |
           git config user.name "Orbit UI checks"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Orbit-Guest.png Orbit-Signin.png Orbit-Register.png
+          git add Orbit-Guest.png Orbit-Workspace.png
           git commit -m "Capture guest, sign-in and registration windows"
-          git push origin HEAD:refs/heads/orbit-field-screenshots
+          git push origin HEAD:refs/heads/orbit-sidebar-preview
