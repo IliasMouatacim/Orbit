@@ -970,6 +970,7 @@ function App() {
   )
   const chatMessages = messages[activeChat] || []
   const query = messageSearch?.trim().toLowerCase()
+  const hasConversation = chatMessages.some(message => !message.system)
   const visibleMessages = query ? chatMessages.filter(message => !message.system &&
     (message.text.toLowerCase().includes(query) || message.user.toLowerCase().includes(query))) : chatMessages
   const closeMessageSearch = () => {
@@ -1142,7 +1143,7 @@ function App() {
         </div>
         <footer className="welcome-footer">
 
-          <a href="https://github.com/IliasMouatacim/Orbit/actions/runs/44969196519/artifacts/14733215769">Download Windows x64 test build (unsigned)</a>
+          <a href="https://github.com/IliasMouatacim/Orbit/releases/download/windows-test-45475001525/orbit-native-windows-test.zip">Download Windows x64 test build (unsigned)</a>
         </footer>
       </main>
     )
@@ -1175,13 +1176,6 @@ function App() {
           >
             <Icon name="close" />
           </button>
-        </div>
-        <div className="workspace-label">
-          <span className="workspace-symbol">O</span>
-          <div>
-            Your workspace<small>Make yourself at home</small>
-          </div>
-          <Icon name="spark" size={16} />
         </div>
         <label className="search-field">
           <Icon name="search" size={17} />
@@ -1218,7 +1212,7 @@ function App() {
                 <Icon name="globe" />
               </span>
               <span className="item-label">
-                Global Room<small>A little bit of everyone</small>
+                Global Room<small>Public conversation</small>
               </span>
               {unread.global > 0 && (
                 <span className="unread-badge">{unread.global}</span>
@@ -1244,10 +1238,8 @@ function App() {
               )}
             </button>
           ))}
+          <label className="room-entry-label" htmlFor="room-code">Create or join a room</label>
           <form className="join-room-form" onSubmit={joinPrivateRoom}>
-            <label className="sr-only" htmlFor="room-code">
-              Enter room code
-            </label>
             <input
               id="room-code"
               className="room-input"
@@ -1273,7 +1265,7 @@ function App() {
               {roomError}
             </p>
           )}
-          <p className="room-hint">Enter a name to create a room, or paste a private invitation.</p>
+          <p className="room-hint">Use a new room name or paste an invitation.</p>
           <div className="menu-section-header people-heading">
             PEOPLE ONLINE <span>{onlineUsers.length}</span>
           </div>
@@ -1283,6 +1275,8 @@ function App() {
               className={`user-item person-item ${activeChat === user.id ? 'active' : ''}`}
               disabled={user.id === socket.id}
               aria-current={activeChat === user.id ? 'page' : undefined}
+              aria-label={user.id === socket.id ? `${user.name} (you)` : `Message ${user.name}`}
+              aria-description={unread[user.id] ? `${unread[user.id]} unread` : undefined}
               onClick={() => selectChat(user.id)}
             >
               <span
@@ -1291,14 +1285,7 @@ function App() {
                 {user.name.slice(0, 1).toUpperCase()}
                 <i className="status-dot" />
               </span>
-              <span className="item-label">
-                {user.name}
-                <small>
-                  {user.id === socket.id
-                    ? 'That’s you'
-                    : 'Here for a conversation'}
-                </small>
-              </span>
+              <span className="item-label">{user.name}</span>
               {user.id === socket.id && <span className="you-tag">You</span>}
               {unread[user.id] > 0 && (
                 <span className="unread-badge">{unread[user.id]}</span>
@@ -1387,9 +1374,9 @@ function App() {
               {!connected
                 ? 'Reconnecting…'
                 : isGlobal
-                  ? `${onlineUsers.length} online · Everyone’s welcome`
+                  ? `${onlineUsers.length} online · Public conversation`
                   : isRoom
-                    ? 'A space for your people'
+                    ? 'Private room'
                     : peer
                       ? 'Online · Direct conversation'
                       : 'This person is offline'}
@@ -1475,7 +1462,7 @@ function App() {
         )}
         <div className="messages-area">
           <div
-            className="messages-scroll"
+            className={`messages-scroll ${hasConversation && !query ? 'has-conversation' : ''}`}
             ref={listRef}
             onScroll={(event) => {
               const element = event.currentTarget
@@ -1490,58 +1477,33 @@ function App() {
             aria-live="polite"
             aria-relevant="additions text"
           >
-            <div className="conversation-intro" hidden={Boolean(query)}>
-              <span className="intro-icon">
-                <Icon name={chatIcon} size={30} />
-              </span>
-              <span className="eyebrow">
-                {isGlobal
-                  ? 'THE COMMON GROUND'
-                  : isRoom
-                    ? 'A LITTLE SPACE OF YOUR OWN'
-                    : 'JUST THE TWO OF YOU'}
-              </span>
-              <h2>
-                {isGlobal
-                  ? 'Good company starts with hello.'
-                  : isRoom
-                    ? `Welcome to #${chatTitle}.`
-                    : `Say hello to ${chatTitle}.`}
-              </h2>
-              <p>
-                {isGlobal
-                  ? 'Share a thought, ask a question, or see where the conversation takes you.'
-                  : isRoom
-                    ? 'You found your corner of Orbit. Share the room code to bring your people together.'
-                    : 'A quick check-in or a long catch-up. This conversation is yours.'}
-              </p>
-              {!chatMessages.some((message) => !message.system) && (
-                <span className="first-message-prompt">
-                  <Icon name="spark" size={14} /> Be the first to break the ice
-                </span>
-              )}
-            </div>
+            {!query && !hasConversation && (
+              <div className="room-welcome">
+                <h2>{isGlobal ? 'Welcome to the Global Room' : isRoom ? `Welcome to #${chatTitle}` : `Chat with ${chatTitle}`}</h2>
+                <p>{isGlobal ? 'Start the conversation. Everyone in the workspace can join in.'
+                  : isRoom ? 'Share the room invitation privately to bring people into this conversation.'
+                  : peer?.verified ? 'Your devices are verified. Send your first message below.'
+                  : peer ? 'Verify your contact’s device below to start messaging.' : 'Your contact is offline.'}</p>
+              </div>
+            )}
+            {query && !visibleMessages.length && (
+              <p className="message-search-empty">No messages match “{messageSearch}”.</p>
+            )}
             {visibleMessages.map((msg, index) => {
               const isSystem = msg.system === true
               const isMine = ownSocketIds.has(msg.from) && !isSystem
-              const day = new Date(msg.timestamp).toLocaleDateString(
-                undefined,
-                { month: 'long', day: 'numeric' },
-              )
-              const previousDay =
-                index > 0
-                  ? new Date(
-                      visibleMessages[index - 1].timestamp,
-                    ).toLocaleDateString(undefined, {
-                      month: 'long',
-                      day: 'numeric',
-                    })
-                  : null
+              const sentAt = new Date(msg.timestamp)
+              const previous = visibleMessages[index - 1]
+              const previousTime = previous && new Date(previous.timestamp)
+              const startsDay = sentAt.toDateString() !== previousTime?.toDateString()
+              const continued = !query && !isSystem && previous && !previous.system &&
+                msg.from && previous.from === msg.from &&
+                Math.floor(sentAt.getTime() / 60000) === Math.floor(previousTime.getTime() / 60000)
               return (
                 <Fragment key={msg.id}>
-                  {day !== previousDay && (
+                  {startsDay && (
                     <div className="date-divider">
-                      <span>{day}</span>
+                      <span>{sentAt.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</span>
                     </div>
                   )}
                   {isSystem ? (
@@ -1550,7 +1512,7 @@ function App() {
                     </div>
                   ) : (
                     <article
-                      className={`message ${isMine ? 'mine' : 'theirs'}`}
+                      className={`message ${isMine ? 'mine' : 'theirs'} ${continued ? 'continued' : ''}`}
                     >
                       <span
                         className={`message-avatar avatar-${msg.user.charCodeAt(0) % 4}`}
@@ -1559,12 +1521,12 @@ function App() {
                         {msg.user.slice(0, 1).toUpperCase()}
                       </span>
                       <div className="message-content">
-                        <div className="message-meta">
+                        <div className={continued ? 'sr-only' : 'message-meta'}>
                           <span className="msg-author">
                             {isMine ? 'You' : msg.user}
                           </span>
                           <time dateTime={msg.timestamp} className="msg-time">
-                            {new Date(msg.timestamp).toLocaleTimeString([], {
+                            {sentAt.toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
@@ -1647,7 +1609,7 @@ function App() {
               <Icon name="send" size={20} />
             </button>
           </form>
-          <div className="composer-hint">
+          <div className="composer-hint" data-empty={!draft.length}>
             <span>
               <kbd>Enter</kbd> to send <span className="hint-separator">·</span>{' '}
               <kbd>Shift + Enter</kbd> for a new line
@@ -1655,7 +1617,7 @@ function App() {
             <span>
               {draft.length > 0
                 ? `${draft.length} / 500`
-                : 'A little kindness goes a long way.'}
+                : ''}
             </span>
           </div>
         </div>
@@ -1667,7 +1629,7 @@ function App() {
         inert={isMobile && sidebarOpen}
       >
         <div className="details-heading">
-          THE LITTLE DETAILS
+          Conversation details
           <button
             className="icon-button"
             aria-label="Close details"
@@ -1676,19 +1638,7 @@ function App() {
             <Icon name="close" size={17} />
           </button>
         </div>
-        <div className="detail-orbit">
-          <span className="detail-orbit-ring" />
-          <Icon name={chatIcon} size={38} />
-          <i />
-        </div>
         <h2>{chatTitle}</h2>
-        <p className="details-description">
-          {isGlobal
-            ? 'An open door to good conversation.'
-            : isRoom
-              ? 'A shared code. A shared space.'
-              : 'A little closer, even from a distance.'}
-        </p>
         <span className="detail-tag">
           <Icon
             name={isGlobal ? 'globe' : isRoom ? 'hash' : 'chat'}
@@ -1702,7 +1652,6 @@ function App() {
         </span>
         <div className="details-rule" />
         <div className="details-note">
-          <Icon name="spark" size={19} />
           <h3>{isGlobal ? 'Public conversation' : 'End-to-end encrypted text'}</h3>
           <p>{isGlobal ? 'Anyone who joins can read public messages.' : isRoom ?
             'Share your room invitation privately. Anyone with it can read messages in this room.' :
@@ -1717,24 +1666,13 @@ function App() {
             <span>
               <Icon name="people" size={17} />
               {isGlobal
-                ? `${onlineUsers.length} people online`
+                ? `${onlineUsers.length} ${onlineUsers.length === 1 ? 'person' : 'people'} online`
                 : peer
                   ? 'Available for a chat'
                   : 'Currently offline'}
             </span>
-            <span>
-              <Icon name="chat" size={17} />
-              Conversations live in the moment
-            </span>
           </div>
         )}
-        <div className="details-footnote">
-          <Icon name="orbit" size={20} />
-          <p>
-            A small space.
-            <br />A world of possibility.
-          </p>
-        </div>
       </aside>
 
       {/* Incoming Call Modal */}
