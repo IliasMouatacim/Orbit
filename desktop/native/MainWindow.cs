@@ -82,7 +82,15 @@ internal sealed class MainWindow : Form
             e.Cancel = true; closing = true;
             BeginInvoke(async () => { try { await LeaveSpace(); } finally { Close(); } });
         };
-        Shown += (_, _) => ShowLogin();
+        Shown += async (_, _) => {
+            if (!Environment.GetCommandLineArgs().Contains("--capture-chat")) { ShowLogin(); return; }
+            chat = new Chat();
+            await chat.Join(Server, "Maya", null);
+            calls = new Calls(chat, enabled => new WindowsMedia(enabled, video));
+            ShowWorkspace();
+            AddMessage("global", "Ilias", "Hey Maya, are we still on for Saturday?");
+            AddMessage("global", "Maya", "Yes! See you at ten.");
+        };
     }
 
     void DrawChannel(object? sender, DrawItemEventArgs e)

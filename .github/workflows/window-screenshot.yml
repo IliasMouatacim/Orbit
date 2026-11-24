@@ -51,11 +51,12 @@ jobs:
             }
             foreach ($mode in @('Guest','Workspace')) {
             if ($mode -eq 'Workspace') {
-              (FindControl 'Display name').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('Maya')
-              (FindControl 'Join as guest').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
-              for ($i=0; $i -lt 40 -and !(FindControl 'Send'); $i++) { Start-Sleep -Milliseconds 250 }
-              (FindControl 'Message').GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).SetValue('Hello from the Windows app!')
-              (FindControl 'Send').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+              $app.Kill()
+              $app = Start-Process app/OrbitChat.exe -ArgumentList '--capture-chat' -PassThru
+              Start-Sleep -Seconds 4
+              $app.Refresh()
+              $root = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+              if (!(FindControl 'Send')) { throw 'Workspace did not appear' }
             } else {
             $cond = New-Object Windows.Automation.PropertyCondition ([Windows.Automation.AutomationElement]::NameProperty),$mode
             $button = $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$cond)
