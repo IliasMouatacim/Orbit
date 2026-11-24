@@ -31,7 +31,10 @@ internal sealed class MainWindow : Form
     readonly TextBox draft = new() { Dock = DockStyle.Fill, MaxLength = 500, PlaceholderText = "Write a message" };
     readonly RoundedField searchField, draftField;
     readonly Label title = new() { AutoSize = true, Font = new("Segoe UI", 16, FontStyle.Bold) };
-    readonly Dictionary<string, List<string>> logs = [];
+    sealed record ChatLine(DateTime Received, string Author, string Body);
+    readonly Dictionary<string, List<ChatLine>> logs = [];
+    readonly Font authorFont = new("Segoe UI", 10, FontStyle.Bold);
+    readonly Font timeFont = new("Segoe UI", 9);
     readonly Dictionary<string, string> drafts = [];
     Chat? chat;
     Calls? calls;
@@ -53,6 +56,9 @@ internal sealed class MainWindow : Form
         channels.BackColor = Forest;
         channels.ForeColor = Paper;
         channels.ItemHeight = 28;
+        Disposed += (_, _) => { authorFont.Dispose(); timeFont.Dispose(); };
+        history.AccessibleName = "Conversation history";
+        history.Margin = new Padding(8, 12, 8, 16);
         search.AccessibleName = "Find people or rooms";
         draft.AccessibleName = "Message";
         searchField = new RoundedField(search, 180) { Dock = DockStyle.Top };
@@ -63,6 +69,7 @@ internal sealed class MainWindow : Form
             if (!refreshing && channels.SelectedItem is Channel row) SelectChannel(row.Id);
         };
         search.TextChanged += (_, _) => Populate();
+        draft.TextChanged += (_, _) => UpdateActions();
         draft.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; send?.PerformClick(); } };
         FormClosing += (_, e) =>
         {
@@ -252,7 +259,7 @@ internal sealed class MainWindow : Form
         }));
         side.Controls.Add(ActionButton("Leave space", async () => { await LeaveSpace(); ShowLogin(); }));
         layout.Controls.Add(side, 0, 0);
-        conversation = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new(12), BackColor = Color.White };
+        conversation = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new(20), BackColor = Color.White };
         conversation.ColumnStyles.Add(new(SizeType.Percent, 100));
         foreach (var style in new RowStyle[] { new(SizeType.AutoSize), new(SizeType.AutoSize), new(SizeType.Absolute, 0), new(SizeType.Percent, 100), new(SizeType.AutoSize) })
             conversation.RowStyles.Add(style);
@@ -309,15 +316,32 @@ internal sealed class MainWindow : Form
     void SelectChannel(string id)
     {
         drafts[selected] = draft.Text; selected = id; draft.Text = drafts.GetValueOrDefault(id, "");
-        history.Text = string.Join(Environment.NewLine, logs.GetValueOrDefault(id) ?? []);
+        history.Clear();
+        if (logs.TryGetValue(id, out var messages))
+            foreach (var message in messages) AppendChatLine(message);
         history.SelectionStart = history.TextLength; history.ScrollToCaret(); UpdateActions();
     }
     void AddMessage(string id, string author, string text)
     {
-        var line = $"{DateTime.Now:t}   {author}    {text}";
+        var line = new ChatLine(DateTime.Now, author, text);
         if (!logs.TryGetValue(id, out var entries)) logs[id] = entries = [];
         entries.Add(line);
-        if (id == selected) { history.AppendText((history.TextLength > 0 ? Environment.NewLine : "") + line); history.ScrollToCaret(); }
+        if (id == selected) { AppendChatLine(line); history.ScrollToCaret(); }
+    }
+
+    void AppendChatLine(ChatLine line)
+    {
+        history.Select(history.TextLength, 0);
+        if (history.TextLength > 0) history.AppendText("\n\n");
+        history.SelectionFont = authorFont;
+        history.SelectionColor = Forest;
+        history.AppendText(line.Author);
+        history.SelectionFont = timeFont;
+        history.SelectionColor = Color.FromArgb(85, 99, 91);
+        history.AppendText($"    {line.Received:t}\n");
+        history.SelectionFont = history.Font;
+        history.SelectionColor = Ink;
+        history.AppendText(line.Body);
     }
     void UpdateActions()
     {
@@ -328,7 +352,7 @@ internal sealed class MainWindow : Form
         voice!.Visible = camera!.Visible = p?.Verified == true;
         voice.Enabled = camera.Enabled = !calls.Busy;
         accept!.Visible = calls.Ringing; hang!.Visible = calls.Busy; invite!.Visible = room != null;
-        send.Enabled = !sending && chat.People.ContainsKey(chat.Relay.Id) && (selected == "global" || room != null || p?.Verified == true);
+        send.Enabled = !sending && !string.IsNullOrWhiteSpace(draft.Text) && chat.People.ContainsKey(chat.Relay.Id) && (selected == "global" || room != null || p?.Verified == true);
         conversation!.RowStyles[2].Height = calls.VideoActive ? 190 : 0;
     }
     Task Dial(bool videoCall) => chat?.People.TryGetValue(selected, out var p) == true && calls != null ? calls.Dial(p, videoCall) : Task.CompletedTask;

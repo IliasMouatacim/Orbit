@@ -64,6 +64,30 @@ jobs:
         with:
           name: orbit-native-windows-test-build
           path: orbit-native-windows-test.zip
+      - name: Build Windows Store package
+        shell: pwsh
+        env:
+          STORE_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+          STORE_DISPLAY_NAME: ${{ vars.STORE_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          [xml]$manifest = Get-Content -Raw desktop/store/AppxManifest.xml
+          if ($env:STORE_NAME -or $env:STORE_PUBLISHER -or $env:STORE_DISPLAY_NAME) {
+            if (!$env:STORE_NAME -or !$env:STORE_PUBLISHER -or !$env:STORE_DISPLAY_NAME) { throw 'Set all three Store identity variables.' }
+            $manifest.Package.Identity.Name = $env:STORE_NAME
+            $manifest.Package.Identity.Publisher = $env:STORE_PUBLISHER
+            $manifest.Package.Properties.PublisherDisplayName = $env:STORE_DISPLAY_NAME
+          }
+          $manifest.Save("$PWD/windows-build/AppxManifest.xml")
+          Copy-Item -Recurse desktop/store/Assets windows-build
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/makeappx.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
+          if (!$sdk) { throw 'Windows SDK packaging tool missing.' }
+          & $sdk.FullName pack /d windows-build /p orbit-chat-x64.msix /o
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-store-package
+          path: orbit-chat-x64.msix
   sign:
     name: Sign Windows download
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
