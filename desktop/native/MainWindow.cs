@@ -43,7 +43,7 @@ internal sealed class MainWindow : Form
     bool refreshing, sending, closing;
     Button? send, verify, voice, camera, accept, hang, invite;
     TableLayoutPanel? conversation;
-    record Channel(string Id, string Label) { public override string ToString() => Label; }
+    record Channel(string Id, string Label, string Badge) { public override string ToString() => Label; }
 
     public MainWindow()
     {
@@ -55,7 +55,12 @@ internal sealed class MainWindow : Form
         status.ForeColor = Color.White;
         channels.BackColor = Forest;
         channels.ForeColor = Paper;
-        channels.ItemHeight = 28;
+        channels.AccessibleName = "Conversations";
+        channels.DrawMode = DrawMode.OwnerDrawFixed;
+        channels.ItemHeight = channels.LogicalToDeviceUnits(44);
+        channels.DpiChangedAfterParent += (_, _) => channels.ItemHeight = channels.LogicalToDeviceUnits(44);
+        channels.DrawItem += DrawChannel;
+        channels.Margin = new Padding(3, 10, 3, 12);
         Disposed += (_, _) => { authorFont.Dispose(); timeFont.Dispose(); };
         history.AccessibleName = "Conversation history";
         history.Margin = new Padding(8, 12, 8, 16);
@@ -78,6 +83,36 @@ internal sealed class MainWindow : Form
             BeginInvoke(async () => { try { await LeaveSpace(); } finally { Close(); } });
         };
         Shown += (_, _) => ShowLogin();
+    }
+
+    void DrawChannel(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0 || e.Index >= channels.Items.Count || channels.Items[e.Index] is not Channel row) return;
+        bool active = e.State.HasFlag(DrawItemState.Selected);
+        bool contrast = SystemInformation.HighContrast;
+        Color background = contrast ? SystemColors.Window : Forest;
+        Color selection = contrast ? SystemColors.Highlight : Color.FromArgb(62, 87, 73);
+        Color text = contrast ? (active ? SystemColors.HighlightText : SystemColors.WindowText) : Paper;
+        int gap = channels.LogicalToDeviceUnits(8);
+        var bounds = Rectangle.Inflate(e.Bounds, -1, -2);
+        if (bounds.Width < gap * 4 || bounds.Height < 4) return;
+        using var surface = new SolidBrush(background);
+        e.Graphics.FillRectangle(surface, e.Bounds);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        if (active) {
+            using var highlight = new SolidBrush(selection);
+            e.Graphics.FillRoundedRectangle(highlight, bounds, new Size(gap, gap));
+        }
+        int diameter = bounds.Height - gap;
+        var badge = new Rectangle(bounds.Left + gap, bounds.Top + gap / 2, diameter, diameter);
+        using var badgeFill = new SolidBrush(contrast ? SystemColors.Window : Color.FromArgb(220, 229, 212));
+        e.Graphics.FillEllipse(badgeFill, badge);
+        var flags = TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix;
+        TextRenderer.DrawText(e.Graphics, row.Badge, authorFont, badge, contrast ? SystemColors.WindowText : Forest,
+            flags | TextFormatFlags.HorizontalCenter);
+        var label = Rectangle.FromLTRB(badge.Right + gap, bounds.Top, bounds.Right - gap, bounds.Bottom);
+        TextRenderer.DrawText(e.Graphics, row.Label, channels.Font, label, text, flags | TextFormatFlags.EndEllipsis);
+        if (e.State.HasFlag(DrawItemState.Focus)) e.DrawFocusRectangle();
     }
 
     static void ShapeAsPill(Control control)
@@ -301,10 +336,10 @@ internal sealed class MainWindow : Form
         try
         {
             channels.Items.Clear();
-            List<Channel> rows = [new("global", "Global Room")];
-            rows.AddRange(chat.Rooms.Values.Select(r => new Channel(r.Id, "# " + r.Label)));
+            List<Channel> rows = [new("global", "Global Room", "G")];
+            rows.AddRange(chat.Rooms.Values.Select(r => new Channel(r.Id, "# " + r.Label, "#")));
             rows.AddRange(chat.People.Values.Where(p => p.Id != chat.Relay.Id).OrderBy(p => p.Name)
-                .Select(p => new Channel(p.Id, p.Name)));
+                .Select(p => new Channel(p.Id, p.Name, System.Globalization.StringInfo.GetNextTextElement(p.Name).ToUpperInvariant())));
             foreach (var row in rows.Where(r => r.Label.Contains(search.Text, StringComparison.OrdinalIgnoreCase)))
             {
                 int index = channels.Items.Add(row); if (row.Id == selected) channels.SelectedIndex = index;
