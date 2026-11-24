@@ -88,6 +88,28 @@ jobs:
         with:
           name: orbit-store-package
           path: orbit-chat-x64.msix
+  publish-test-download:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/native-windows'
+    needs: native
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: orbit-native-windows-test-build
+      - name: Publish tested ZIP for signed-out visitors
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="windows-test-${GITHUB_RUN_ID}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" orbit-native-windows-test.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" orbit-native-windows-test.zip --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease --title "Orbit Chat for Windows (test build)" \
+              --notes "Unsigned Windows x64 test build. Extract the ZIP and open OrbitChat.exe."
+          fi
   sign:
     name: Sign Windows download
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
