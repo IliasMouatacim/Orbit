@@ -89,8 +89,8 @@ internal sealed class MainWindow : Form
             await chat.Join(Server, "Maya", null);
             calls = new Calls(chat, enabled => new WindowsMedia(enabled, video));
             ShowWorkspace();
-            AddMessage("global", "Ilias", "Hey Maya, are we still on for Saturday?");
-            AddMessage("global", "Maya", "Yes! See you at ten.");
+            AddMessage("global", "Ilias", "Hey Maya, are we still on for Saturday?", false);
+            AddMessage("global", "Maya", "Yes! See you at ten.", true);
         };
     }
 
