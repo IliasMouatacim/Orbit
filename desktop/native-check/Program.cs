@@ -76,7 +76,7 @@ static class Program
         var peerB = a.People[b.Relay.Id]; var peerA = b.People[a.Relay.Id];
         if (peerB.OwnCode != peerA.TheirCode || peerA.OwnCode != peerB.TheirCode) throw new Exception("Verification mismatch.");
         var inbox = new List<(string, string)>();
-        b.Message += (id, _, text) => inbox.Add((id, text));
+        b.Message += (id, _, text, _) => inbox.Add((id, text));
         await a.Send("global", "global check");
         var room = await a.JoinRoom("Native"); await b.JoinRoom(room.Invite);
         await a.Send(room.Id, "room check");

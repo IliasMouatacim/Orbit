@@ -19,7 +19,7 @@ internal sealed class Chat : IDisposable
     public Dictionary<string, Room> Rooms { get; } = [];
     public string Name { get; private set; } = "";
     public event Action? Changed;
-    public event Action<string, string, string>? Message;
+    public event Action<string, string, string, bool>? Message;
     public event Action<string, JsonElement>? Signal;
     public Chat() => Relay.Received += Receive;
 
@@ -75,7 +75,7 @@ internal sealed class Chat : IDisposable
                     }
                     else return;
                     string text = Device.Open(shared, [channel, from, to], packet, 500);
-                    if (seen.Add(from + "/" + Str(packet, "nonce"))) Message?.Invoke(chat, sender.Name, text);
+                    if (seen.Add(from + "/" + Str(packet, "nonce"))) Message?.Invoke(chat, sender.Name, text, from == Relay.Id);
                     break;
                 case "call_user":
                 case "call_accepted":
@@ -133,7 +133,7 @@ internal sealed class Chat : IDisposable
         }
         else throw new InvalidOperationException("Verify this device before sending.");
         if (!await Relay.Deliver(new { kind, target, deliveries })) throw new IOException("Delivery could not be confirmed.");
-        if (kind == "direct") Message?.Invoke(target, Name, text);
+        if (kind == "direct") Message?.Invoke(target, Name, text, true);
     }
     public void Dispose() { Relay.Dispose(); device.Dispose(); }
 }
